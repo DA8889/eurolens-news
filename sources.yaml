@@ -1,0 +1,135 @@
+# EuroLens — news source seed config
+# Companion to EuroLens_News_Sources_Directory.md (full list, incl. uncertain/newsroom-only sources).
+# This file holds only feeds with a known URL and confidence = verified | documented.
+# Validate each endpoint at first ingestion; feeds drift.
+#
+# Field key:
+#   tier:       eu | broadcaster | agency | government | parliament | central_bank | stat_office | wire | aggregator
+#   country:    ISO-2 (EL=Greece, GB=UK) or EU for institutions / — for pan-European
+#   confidence: verified (fetched to live XML) | documented (listed officially, not fetch-checked here)
+#   license:    eu_reuse (Dec 2011/833 / CC BY 4.0) | psi_attribution (public-sector info, attribute)
+#               | broadcaster_snippet (headline+link+short snippet only) | agency_free_attribution
+#               | agency_commercial (do NOT pull full text; reach via aggregator) | open_cc | aggregator
+#   note:       caveats
+#
+# Ingestion rule (all tiers): store link + source + short snippet + your own summary; never re-host full text.
+
+defaults:
+  poll_minutes: 30           # institutions can be hourly+; agencies/broadcasters 15-30 min
+  user_agent: "EuroLensNewsBot/0.1 (+contact-you@example.com)"
+  respect_robots: true
+
+feeds:
+
+  # ===================== EU INSTITUTIONAL =====================
+  - {id: eu_commission_presscorner, tier: eu, country: EU, name: "European Commission — Press corner", url: "https://ec.europa.eu/commission/presscorner/api/rss?language=en", lang: en, confidence: verified,   license: eu_reuse, note: "swap language= for other EU languages"}
+  - {id: eu_council_pressreleases,  tier: eu, country: EU, name: "Council of the EU — Press releases",  url: "https://www.consilium.europa.eu/en/rss/pressreleases.ashx",       lang: en, confidence: documented, license: eu_reuse, note: "language set by /en/ path segment"}
+  - {id: eu_parliament_index,       tier: eu, country: EU, name: "European Parliament — RSS index",     url: "https://www.europarl.europa.eu/at-your-service/en/stay-informed/rss-feeds", lang: multi, confidence: documented, license: eu_reuse, note: "pick per-topic/committee feeds: /rss/[section]/[code]/en.xml"}
+  - {id: eu_ecb_press,   tier: eu, country: EU, name: "ECB — Press releases/speeches", url: "https://www.ecb.europa.eu/rss/press.html",     lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_ecb_blog,    tier: eu, country: EU, name: "ECB — Blog",                    url: "https://www.ecb.europa.eu/rss/blog.html",      lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_ecb_statpress,tier: eu, country: EU, name: "ECB — Statistical releases",   url: "https://www.ecb.europa.eu/rss/statpress.html", lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_eurostat,    tier: eu, country: EU, name: "Eurostat — RSS hub",            url: "https://ec.europa.eu/eurostat/web/rss",        lang: en, confidence: documented, license: eu_reuse, note: "per-theme feeds generated via alert system"}
+  - {id: eu_ema_news,    tier: eu, country: EU, name: "EMA — News & press",            url: "https://www.ema.europa.eu/en/news.xml",        lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_ecdc_news,   tier: eu, country: EU, name: "ECDC — News/press",             url: "https://www.ecdc.europa.eu/en/taxonomy/term/1307/feed", lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_ecdc_threats,tier: eu, country: EU, name: "ECDC — Communicable disease threats report", url: "https://www.ecdc.europa.eu/en/taxonomy/term/1505/feed", lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_eea_press,   tier: eu, country: EU, name: "EEA — Press releases",          url: "https://www.eea.europa.eu/en/newsroom/rss-feeds/eeas-press-releases-rss", lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_eea_pubs,    tier: eu, country: EU, name: "EEA — Publications",            url: "https://www.eea.europa.eu/en/newsroom/rss-feeds/publications-rss", lang: en, confidence: verified, license: eu_reuse}
+  - {id: eu_enisa,       tier: eu, country: EU, name: "ENISA — RSS feeds",             url: "https://www.enisa.europa.eu/rss-feeds", lang: en, confidence: documented, license: eu_reuse, note: "pick feed from list on page"}
+
+  # ===================== NATIONAL BROADCASTERS =====================
+  - {id: at_orf,        tier: broadcaster, country: AT, name: "ORF news",              url: "https://rss.orf.at/news.xml", lang: de, confidence: verified, license: broadcaster_snippet}
+  - {id: be_vrt_nl,     tier: broadcaster, country: BE, name: "VRT NWS (NL)",          url: "https://www.vrt.be/vrtnws/nl.rss.articles.xml", lang: nl, confidence: verified, license: broadcaster_snippet}
+  - {id: be_vrt_en,     tier: broadcaster, country: BE, name: "VRT NWS (EN)",          url: "https://www.vrt.be/vrtnws/en.rss.articles.xml", lang: en, confidence: verified, license: broadcaster_snippet}
+  - {id: be_rtbf,       tier: broadcaster, country: BE, name: "RTBF",                  url: "https://rss.rtbf.be/article/rss/rtbf_flux.xml", lang: fr, confidence: verified, license: broadcaster_snippet}
+  - {id: bg_bnt,        tier: broadcaster, country: BG, name: "BNT",                   url: "http://news.bnt.bg/bg/rss/news.xml", lang: bg, confidence: verified, license: broadcaster_snippet}
+  - {id: cz_ct24,       tier: broadcaster, country: CZ, name: "Ceska televize (CT24)", url: "https://ct24.ceskatelevize.cz/rss/hlavni-zpravy", lang: cs, confidence: verified, license: broadcaster_snippet}
+  - {id: cz_irozhlas,   tier: broadcaster, country: CZ, name: "Cesky rozhlas (iROZHLAS)", url: "https://www.irozhlas.cz/rss/irozhlas", lang: cs, confidence: verified, license: broadcaster_snippet}
+  - {id: de_tagesschau, tier: broadcaster, country: DE, name: "ARD Tagesschau",       url: "https://www.tagesschau.de/index~rss2.xml", lang: de, confidence: documented, license: broadcaster_snippet}
+  - {id: de_zdfheute,   tier: broadcaster, country: DE, name: "ZDFheute",             url: "https://www.zdfheute.de/rss/zdf/nachrichten", lang: de, confidence: verified, license: broadcaster_snippet}
+  - {id: de_dw_en,      tier: broadcaster, country: DE, name: "Deutsche Welle (EN, all)", url: "https://rss.dw.com/rdf/rss-en-all", lang: en, confidence: documented, license: broadcaster_snippet, note: "also -en-top, -en-eu; 30+ languages"}
+  - {id: dk_dr,         tier: broadcaster, country: DK, name: "DR",                    url: "https://www.dr.dk/nyheder/service/feeds/senestenyt", lang: da, confidence: documented, license: broadcaster_snippet}
+  - {id: ee_err_en,     tier: broadcaster, country: EE, name: "ERR (EN)",             url: "https://news.err.ee/rss", lang: en, confidence: verified, license: broadcaster_snippet}
+  - {id: el_ert,        tier: broadcaster, country: EL, name: "ERT (ertnews)",        url: "https://www.ertnews.gr/feed/", lang: el, confidence: verified, license: broadcaster_snippet}
+  - {id: fr_francetvinfo,tier: broadcaster, country: FR, name: "France Televisions (franceinfo)", url: "https://www.francetvinfo.fr/titres.rss", lang: fr, confidence: documented, license: broadcaster_snippet}
+  - {id: fr_france24_en,tier: broadcaster, country: FR, name: "France 24 (EN)",       url: "https://www.france24.com/en/rss", lang: en, confidence: documented, license: broadcaster_snippet}
+  - {id: fr_rfi_en,     tier: broadcaster, country: FR, name: "RFI (EN)",             url: "https://www.rfi.fr/en/rss", lang: en, confidence: documented, license: broadcaster_snippet}
+  - {id: gb_bbc_news,   tier: broadcaster, country: GB, name: "BBC News",            url: "https://feeds.bbci.co.uk/news/rss.xml", lang: en, confidence: documented, license: broadcaster_snippet, note: "world: /news/world/rss.xml"}
+  - {id: hr_hrt,        tier: broadcaster, country: HR, name: "HRT vijesti",          url: "https://feed.hrt.hr/vijesti/page.xml", lang: hr, confidence: verified, license: broadcaster_snippet, note: "world /svijet.xml, EU /eu.xml"}
+  - {id: ie_rte,        tier: broadcaster, country: IE, name: "RTE",                  url: "https://www.rte.ie/feeds/rss/?index=/news/", lang: en, confidence: documented, license: broadcaster_snippet}
+  - {id: lt_lrt_en,     tier: broadcaster, country: LT, name: "LRT (EN)",            url: "https://www.lrt.lt/en/news-in-english?rss", lang: en, confidence: documented, license: broadcaster_snippet}
+  - {id: lv_lsm_lv,     tier: broadcaster, country: LV, name: "LSM (LV)",            url: "https://www.lsm.lv/rss/", lang: lv, confidence: verified, license: broadcaster_snippet}
+  - {id: lv_lsm_en,     tier: broadcaster, country: LV, name: "LSM (EN)",            url: "https://eng.lsm.lv/rss/", lang: en, confidence: verified, license: broadcaster_snippet}
+  - {id: nl_nos,        tier: broadcaster, country: NL, name: "NOS",                  url: "https://feeds.nos.nl/nosnieuwsalgemeen", lang: nl, confidence: verified, license: broadcaster_snippet}
+  - {id: pt_rtp,        tier: broadcaster, country: PT, name: "RTP noticias",         url: "https://www.rtp.pt/noticias/rss", lang: pt, confidence: verified, license: broadcaster_snippet}
+  - {id: ro_tvr,        tier: broadcaster, country: RO, name: "TVR (tvrinfo)",        url: "https://tvrinfo.ro/feed/", lang: ro, confidence: verified, license: broadcaster_snippet}
+  - {id: ro_rri_en,     tier: broadcaster, country: RO, name: "Radio Romania Int. (EN)", url: "https://www.rri.ro/en/feed", lang: en, confidence: verified, license: broadcaster_snippet}
+  - {id: se_svt,        tier: broadcaster, country: SE, name: "SVT Nyheter",          url: "https://www.svt.se/nyheter/rss.xml", lang: sv, confidence: verified, license: broadcaster_snippet}
+  - {id: se_sr_ekot,    tier: broadcaster, country: SE, name: "Sveriges Radio (Ekot)", url: "https://api.sr.se/api/rss/program/83", lang: sv, confidence: verified, license: broadcaster_snippet}
+  - {id: se_sr_en,      tier: broadcaster, country: SE, name: "Radio Sweden (EN)",    url: "https://api.sr.se/api/rss/program/2054", lang: en, confidence: verified, license: broadcaster_snippet}
+  - {id: si_rtvslo,     tier: broadcaster, country: SI, name: "RTV SLO (MMC)",        url: "https://img.rtvslo.si/feeds/00.xml", lang: sl, confidence: verified, license: broadcaster_snippet}
+  - {id: sk_stvr,       tier: broadcaster, country: SK, name: "STVR (ex-RTVS)",       url: "https://spravy.stvr.sk/feed/", lang: sk, confidence: verified, license: broadcaster_snippet}
+  - {id: eu_euronews,   tier: broadcaster, country: "—", name: "Euronews",           url: "https://www.euronews.com/rss", lang: en, confidence: verified, license: broadcaster_snippet}
+  - {id: eu_euractiv,   tier: broadcaster, country: "—", name: "Euractiv (EU affairs)", url: "https://www.euractiv.com/feed/", lang: en, confidence: documented, license: broadcaster_snippet}
+
+  # ===================== NATIONAL NEWS AGENCIES (feeds that exist) =====================
+  - {id: it_ansa,       tier: agency, country: IT, name: "ANSA (RSS list)",           url: "https://www.ansa.it/main/html/ansa_rss.html", lang: it, confidence: documented, license: agency_free_attribution, note: "teasers free; full reuse paid"}
+  - {id: ro_agerpres,   tier: agency, country: RO, name: "Agerpres public newsfeed",  url: "https://www.agerpres.ro/", lang: ro, confidence: documented, license: agency_free_attribution, note: "reuse <=500 chars / half-article w/ credit"}
+  - {id: bg_bta,        tier: agency, country: BG, name: "BTA (state agency)",         url: "https://www.bta.bg/en/bta", lang: bg, confidence: documented, license: agency_free_attribution, note: "free to read; attributed editorial reuse"}
+  # Paid-only agencies (APA, Belga, CTK, dpa, Ritzau, BNS, AFP, PA, EFE, STT, ELTA, LETA, ANP, PAP, TT, TASR)
+  # are intentionally omitted — reach their stories via the aggregators below, not by pulling their wire.
+
+  # ===================== NATIONAL GOVERNMENTS =====================
+  - {id: be_gov,  tier: government, country: BE, name: "Belgium — press releases", url: "https://news.belgium.be/en/feeds/all", lang: en, confidence: verified, license: psi_attribution}
+  - {id: cz_gov,  tier: government, country: CZ, name: "Czech govt",               url: "https://vlada.gov.cz/en/rss.xml", lang: en, confidence: verified, license: psi_attribution}
+  - {id: de_gov,  tier: government, country: DE, name: "Bundesregierung",          url: "https://www.bundesregierung.de/service/rss/breg-de/1151244/feed.xml", lang: de, confidence: verified, license: psi_attribution}
+  - {id: ee_gov,  tier: government, country: EE, name: "Estonian govt",            url: "https://valitsus.ee/en/rss-feeds/rss.xml", lang: en, confidence: verified, license: psi_attribution}
+  - {id: el_gov,  tier: government, country: EL, name: "Greek PM",                 url: "https://www.primeminister.gr/feed", lang: el, confidence: verified, license: psi_attribution}
+  - {id: es_gov,  tier: government, country: ES, name: "La Moncloa",               url: "https://www.lamoncloa.gob.es/paginas/rss.aspx?tipo=131", lang: en, confidence: verified, license: psi_attribution}
+  - {id: fi_gov,  tier: government, country: FI, name: "Finnish govt",             url: "https://valtioneuvosto.fi/en/staattiset-feedit-en/-/asset_publisher/LOmkEPY4nk2s/rss", lang: en, confidence: verified, license: psi_attribution}
+  - {id: gb_gov,  tier: government, country: GB, name: "GOV.UK news",              url: "https://www.gov.uk/search/news-and-communications.atom", lang: en, confidence: verified, license: psi_attribution, note: "filter by department with query params"}
+  - {id: hr_gov,  tier: government, country: HR, name: "Croatian govt",            url: "https://vlada.gov.hr/rss/18232", lang: hr, confidence: documented, license: psi_attribution}
+  - {id: lu_gov,  tier: government, country: LU, name: "Luxembourg govt",          url: "https://gouvernement.lu/en/actualites/toutes_actualites.rss", lang: en, confidence: verified, license: psi_attribution}
+  - {id: si_gov,  tier: government, country: SI, name: "Slovenian govt (GOV.SI)",  url: "https://www.gov.si/en/news/rss/", lang: en, confidence: verified, license: psi_attribution}
+
+  # ===================== NATIONAL PARLIAMENTS =====================
+  - {id: cz_parl, tier: parliament, country: CZ, name: "Chamber of Deputies (bills)", url: "https://www.psp.cz/rss/tisky.rss", lang: cs, confidence: verified, license: psi_attribution}
+  - {id: de_parl, tier: parliament, country: DE, name: "Bundestag press",          url: "https://www.bundestag.de/static/appdata/includes/rss/pressemitteilungen.rss", lang: de, confidence: verified, license: psi_attribution}
+  - {id: el_parl, tier: parliament, country: EL, name: "Hellenic Parliament",      url: "https://www.hellenicparliament.gr/rssfeed/RssNews.aspx?catid=573EB3FF-7DC6-44C9-9969-58284F0951E3", lang: el, confidence: verified, license: psi_attribution}
+  - {id: fr_parl, tier: parliament, country: FR, name: "Assemblee nationale",      url: "http://www.assemblee-nationale.fr/dyn/rss/communiques-de-presse.xml", lang: fr, confidence: verified, license: psi_attribution}
+  - {id: gb_parl_bills, tier: parliament, country: GB, name: "UK Parliament (bills)", url: "https://bills.parliament.uk/rss/allbills.rss", lang: en, confidence: verified, license: psi_attribution}
+  - {id: se_parl, tier: parliament, country: SE, name: "Riksdag decisions",        url: "https://data.riksdagen.se/dokumentlista/?avd=dokument&doktyp=bet&beslutad=1&sort=beslutsdag&sortorder=desc&utformat=rss", lang: sv, confidence: verified, license: psi_attribution}
+
+  # ===================== NATIONAL CENTRAL BANKS =====================
+  - {id: be_cb, tier: central_bank, country: BE, name: "National Bank of Belgium", url: "https://www.nbb.be/en/news_rss.xml", lang: en, confidence: verified, license: psi_attribution}
+  - {id: bg_cb, tier: central_bank, country: BG, name: "Bulgarian National Bank",  url: "https://www.bnb.bg/AboutUs/PressOffice/PORSS/index.htm?getRSS=1&lang=EN&cat=2", lang: en, confidence: verified, license: psi_attribution}
+  - {id: cz_cb, tier: central_bank, country: CZ, name: "Czech National Bank",       url: "https://www.cnb.cz/en/.content/rss-feed/rss-feed_tz.xml", lang: en, confidence: verified, license: psi_attribution}
+  - {id: de_cb, tier: central_bank, country: DE, name: "Bundesbank",                url: "https://www.bundesbank.de/service/rss/en/633306/feed.rss", lang: en, confidence: verified, license: psi_attribution}
+  - {id: es_cb, tier: central_bank, country: ES, name: "Banco de Espana",           url: "https://www.bde.es/wbe/en/inicio/rss/rss-noticias/", lang: en, confidence: verified, license: psi_attribution}
+  - {id: gb_cb, tier: central_bank, country: GB, name: "Bank of England",           url: "https://www.bankofengland.co.uk/rss/news", lang: en, confidence: verified, license: psi_attribution}
+  - {id: hu_cb, tier: central_bank, country: HU, name: "Magyar Nemzeti Bank",       url: "https://mnb.hu/enrss/16", lang: en, confidence: verified, license: psi_attribution}
+  - {id: ie_cb, tier: central_bank, country: IE, name: "Central Bank of Ireland",   url: "https://www.centralbank.ie/feeds/news-media-feed", lang: en, confidence: verified, license: psi_attribution}
+  - {id: it_cb, tier: central_bank, country: IT, name: "Banca d'Italia",            url: "https://www.bancaditalia.it/util/index.rss.html?sezione=/media/comunicati&lingua=en", lang: en, confidence: verified, license: psi_attribution}
+  - {id: lt_cb, tier: central_bank, country: LT, name: "Bank of Lithuania",         url: "http://www.lb.lt/en/news/rss", lang: en, confidence: verified, license: psi_attribution}
+  - {id: lu_cb, tier: central_bank, country: LU, name: "Banque centrale du Luxembourg", url: "https://www.bcl.lu/en/support/rss/00_rssfeed.rss", lang: en, confidence: verified, license: psi_attribution}
+  - {id: mt_cb, tier: central_bank, country: MT, name: "Central Bank of Malta",     url: "https://www.centralbankmalta.org/rssnews.ashx", lang: en, confidence: verified, license: psi_attribution}
+  - {id: nl_cb, tier: central_bank, country: NL, name: "De Nederlandsche Bank",     url: "https://www.dnb.nl/en/rss/16451/6882", lang: en, confidence: verified, license: psi_attribution}
+  - {id: el_cb, tier: central_bank, country: EL, name: "Bank of Greece",            url: "https://www.bankofgreece.gr/_layouts/15/BPC.RssFeeder/RssPage.aspx?Param=PressReleases&lang=en", lang: en, confidence: documented, license: psi_attribution}
+
+  # ===================== NATIONAL STATISTICAL OFFICES =====================
+  - {id: bg_stat, tier: stat_office, country: BG, name: "NSI Bulgaria",   url: "https://www.nsi.bg/en/pressreleases.xml", lang: en, confidence: verified, license: psi_attribution}
+  - {id: cz_stat, tier: stat_office, country: CZ, name: "CZSO",           url: "https://csu.gov.cz/rss/produkty?kodVlastnostiVystupu=TZ&jazyk=EN", lang: en, confidence: verified, license: psi_attribution}
+  - {id: de_stat, tier: stat_office, country: DE, name: "Destatis",       url: "https://www.destatis.de/SiteGlobals/Functions/RSSFeed/DE/RSSNewsfeed/Aktuell.xml", lang: de, confidence: verified, license: psi_attribution}
+  - {id: el_stat, tier: stat_office, country: EL, name: "ELSTAT",         url: "http://www.statistics.gr/publications/api/rssfeed?locale=en&results=8", lang: en, confidence: verified, license: psi_attribution}
+  - {id: es_stat, tier: stat_office, country: ES, name: "INE Spain",      url: "https://ine.es/dyngs/Prensa/en/rssNovedades.xml", lang: en, confidence: verified, license: psi_attribution}
+  - {id: gb_stat, tier: stat_office, country: GB, name: "ONS",            url: "https://www.ons.gov.uk/releasecalendar?rss&limit=10&page=1&release-type=type-published&sort=date-newest", lang: en, confidence: verified, license: psi_attribution}
+  - {id: hu_stat, tier: stat_office, country: HU, name: "KSH",            url: "http://www.ksh.hu/rss/news", lang: en, confidence: verified, license: psi_attribution}
+  - {id: it_stat, tier: stat_office, country: IT, name: "ISTAT",          url: "https://www.istat.it/en/documents/press-release/feed", lang: en, confidence: verified, license: psi_attribution}
+  - {id: lt_stat, tier: stat_office, country: LT, name: "Statistics Lithuania", url: "https://osp.stat.gov.lt/personalisation-portlet/rss-feed?lang=en_GB", lang: en, confidence: verified, license: psi_attribution}
+  - {id: nl_stat, tier: stat_office, country: NL, name: "CBS Netherlands", url: "https://www.cbs.nl/en-gb/rss-feeds/all-news-items", lang: en, confidence: verified, license: psi_attribution}
+  - {id: pl_stat, tier: stat_office, country: PL, name: "GUS Poland",     url: "https://stat.gov.pl/rss/en/3/3.xml", lang: en, confidence: verified, license: psi_attribution}
+
+  # ===================== WIRES / AGGREGATORS (the compliant wide net) =====================
+  - {id: agg_gdelt, tier: aggregator, country: "—", name: "GDELT DOC 2.0 API", url: "https://api.gdeltproject.org/api/v2/doc/doc", lang: multi, confidence: documented, license: aggregator, note: "primary net; query by sourcecountry/lang/theme; returns metadata+links, fetch originals yourself"}
+  - {id: agg_googlenews, tier: aggregator, country: "—", name: "Google News RSS (query template)", url: "https://news.google.com/rss/search?q=%QUERY%&hl=en&gl=%CC%&ceid=%CC%:en", lang: multi, confidence: documented, license: aggregator, note: "headline+link only; substitute %QUERY%, %CC% (country)"}
+  - {id: wire_ednh, tier: wire, country: "—", name: "European Data News Hub (EDNH)", url: "https://ednh.news/en/", lang: multi, confidence: documented, license: agency_free_attribution, note: "AFP/dpa/ANSA/ANP/TT/Agerpres, EC-funded, free reuse — confirm Terms of Use"}
+  - {id: wire_wikinews, tier: wire, country: "—", name: "Wikinews (EN)", url: "https://en.wikinews.org/w/index.php?title=Special:NewsFeed&feed=rss", lang: en, confidence: documented, license: open_cc, note: "CC BY 2.5; thin coverage but truly open"}

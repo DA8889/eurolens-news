@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+# built each run, deployed to Pages, never committed
+site/*.json
+site/feed.xml
+site/feeds/

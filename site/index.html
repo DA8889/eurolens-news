@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EuroLens News</title>
+<link rel="alternate" type="application/atom+xml" title="EuroLens news: all sources" href="feed.xml">
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --line:#e7e5e4; --card:#fff; --accent:#1d4ed8; --bad:#b91c1c; --ok:#15803d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0c0a09; --fg:#e7e5e4; --muted:#a8a29e; --line:#292524; --card:#1c1917; --accent:#93c5fd; --bad:#f87171; --ok:#4ade80; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; }
+  main { max-width:900px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .muted { color:var(--muted); font-size:13px; }
+  nav { display:flex; gap:8px; margin:12px 0; }
+  nav button { background:none; border:1px solid var(--line); color:var(--fg); padding:6px 12px; border-radius:6px; cursor:pointer; }
+  nav button.on { background:var(--fg); color:var(--bg); }
+  .filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .filters select, .filters input { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
+  .filters input { flex:1; min-width:160px; }
+  ul { list-style:none; margin:0; padding:0; }
+  li.item { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  li.item a { color:var(--fg); font-weight:600; text-decoration:none; }
+  li.item a:hover { color:var(--accent); text-decoration:underline; }
+  .snip { margin:4px 0 0; font-size:14px; }
+  .meta { margin-top:4px; }
+  .tag { display:inline-block; border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:12px; margin-right:4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .bad { color:var(--bad); } .ok { color:var(--ok); }
+  .feeds a { color:var(--accent); margin-right:8px; font-size:13px; }
+  .tablewrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>EuroLens News</h1>
+  <div class="muted" id="updated">Loading…</div>
+  <nav><button id="t-feed" class="on">Feed</button><button id="t-health">Health</button></nav>
+
+  <section id="feed">
+    <div class="filters">
+      <select id="f-country"><option value="">All countries</option></select>
+      <select id="f-tier"><option value="">All tiers</option></select>
+      <select id="f-source"><option value="">All sources</option></select>
+      <input id="f-q" type="search" placeholder="Search titles and snippets">
+    </div>
+    <div class="muted" id="count"></div>
+    <ul id="items"></ul>
+  </section>
+
+  <section id="health" hidden>
+    <p class="feeds muted">Feed reader URLs: <span id="feedlinks"></span></p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Feed</th><th>Status</th><th>Items</th><th>New</th><th>Error</th></tr></thead>
+      <tbody id="hrows"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = s => new Date(s).toLocaleString(undefined, {dateStyle:"medium", timeStyle:"short"});
+const countryOf = r => (r.source_country_raw && r.source_country_raw !== "—") ? r.source_country_raw : "EU";
+let items = [];
+
+function fill(sel, values) {
+  for (const v of [...new Set(values)].sort()) sel.add(new Option(v, v));
+}
+
+function render() {
+  const c = $("f-country").value, t = $("f-tier").value, s = $("f-source").value;
+  const q = $("f-q").value.trim().toLowerCase();
+  const shown = items.filter(r =>
+    (!c || countryOf(r) === c) && (!t || r.tier === t) && (!s || r.source_name === s) &&
+    (!q || (r.title + " " + (r.snippet || "")).toLowerCase().includes(q)));
+  $("count").textContent = `${shown.length} of ${items.length} items from the last 48 hours`;
+  $("items").innerHTML = shown.slice(0, 500).map(r => `
+    <li class="item">
+      <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
+      ${r.snippet ? `<p class="snip">${esc(r.snippet)}</p>` : ""}
+      <div class="meta muted">
+        <span class="tag">${esc(countryOf(r))}</span><span class="tag">${esc(r.tier)}</span>
+        ${esc(r.source_name)} · ${r.published_at ? fmt(r.published_at) : "fetched " + fmt(r.fetched_at)}
+      </div>
+    </li>`).join("");
+}
+
+function tab(name) {
+  $("feed").hidden = name !== "feed"; $("health").hidden = name !== "health";
+  $("t-feed").classList.toggle("on", name === "feed"); $("t-health").classList.toggle("on", name === "health");
+}
+
+async function load() {
+  const [latest, health] = await Promise.all(["latest.json", "health.json"].map(u => fetch(u).then(r => r.json())));
+  items = latest.items;
+  $("updated").textContent = `Updated ${fmt(latest.updated)}`;
+  fill($("f-country"), items.map(countryOf));
+  fill($("f-tier"), items.map(r => r.tier));
+  fill($("f-source"), items.map(r => r.source_name));
+  render();
+
+  const feeds = health.feeds.slice().sort((a, b) => a.ok - b.ok || a.feed_id.localeCompare(b.feed_id));
+  const dead = feeds.filter(f => !f.ok).length;
+  $("t-health").textContent = dead ? `Health (${dead} failing)` : "Health";
+  $("hrows").innerHTML = feeds.map(f => `
+    <tr><td><a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name)}</a><br><span class="muted">${esc(f.feed_id)}</span></td>
+    <td class="${f.ok ? "ok" : "bad"}">${f.ok ? "ok" : "failing"}${f.http_status ? " (" + f.http_status + ")" : ""}</td>
+    <td>${f.items}</td><td>${f.new}</td><td class="muted">${esc(f.error)}</td></tr>`).join("");
+
+  const ccs = [...new Set(items.map(countryOf))].sort();
+  $("feedlinks").innerHTML = `<a href="feed.xml">all sources</a>` + ccs.map(cc => `<a href="feeds/${cc}.xml">${cc}</a>`).join("");
+}
+
+$("t-feed").onclick = () => tab("feed");
+$("t-health").onclick = () => tab("health");
+for (const id of ["f-country", "f-tier", "f-source", "f-q"]) $(id).addEventListener("input", render);
+load().catch(e => { $("updated").textContent = "Could not load data: " + e; });
+</script>
+</body>
+</html>
