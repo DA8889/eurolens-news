@@ -85,7 +85,8 @@ def find_feed(url):
         if parsed:
             return resp2.url, parsed
     raise Fail(f"{url} is not a feed, advertises no working RSS/Atom feed, and has none at "
-               f"{', '.join(COMMON_PATHS)}. Find the feed URL on the site and submit that instead.")
+               f"{', '.join(COMMON_PATHS)}. Find the feed URL on the site and submit that, "
+               "or re-submit with the Google News option.")
 
 
 def google_news(url):
