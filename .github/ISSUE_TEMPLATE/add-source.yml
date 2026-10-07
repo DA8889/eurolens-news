@@ -1,0 +1,37 @@
+name: Add a source
+description: Test a feed live and add it to sources.yaml (repo owner only)
+title: "Add source"
+labels: [add-source]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Feed or website URL
+      description: An RSS/Atom feed, a site homepage (its feed is found automatically), or a Google Alerts RSS link.
+    validations:
+      required: true
+  - type: dropdown
+    id: country
+    attributes:
+      label: Country
+      options: ["— (pan-European or none)", EU, AT, BE, BG, CY, CZ, DE, DK, EE, EL, ES, FI, FR, GB, HR, HU, IE, IT, LT, LU, LV, MT, NL, PL, PT, RO, SE, SI, SK]
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tier
+      options: [broadcaster, eu, government, parliament, central_bank, stat_office, agency, wire, aggregator]
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Name (optional)
+      description: Leave blank to use the feed's own title.
+  - type: checkboxes
+    id: google
+    attributes:
+      label: If blocked
+      options:
+        - label: If the site blocks bots, add it via Google News instead

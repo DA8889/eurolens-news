@@ -1,0 +1,59 @@
+name: add-source
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: add-source
+  cancel-in-progress: false
+
+jobs:
+  add:
+    # Public repo: only the owner's form submissions may change sources.yaml.
+    if: contains(github.event.issue.labels.*.name, 'add-source') && github.event.issue.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - id: add
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}   # passed as data, never spliced into shell
+        run: |
+          set +e
+          python add_source.py --from-issue > result.txt
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat result.txt
+
+      - if: steps.add.outputs.code == '0'
+        run: |
+          git config user.name "eurolens-news-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sources.yaml
+          git commit -q -m "Add source (#$ISSUE)"
+          git pull --rebase -q origin main
+          git push -q origin HEAD:main
+          printf '\n\nIt will appear on the Health tab after the collect run that has just been started (about a minute).\n' >> result.txt
+          gh issue close "$ISSUE" --comment "$(cat result.txt)"
+          # A push made with GITHUB_TOKEN does not trigger other workflows, so start collect explicitly.
+          gh workflow run collect.yml
+
+      - if: steps.add.outputs.code != '0'
+        run: gh issue comment "$ISSUE" --body-file result.txt

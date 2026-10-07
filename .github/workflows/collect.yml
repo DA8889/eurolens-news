@@ -2,7 +2,7 @@ name: collect
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # matches poll_minutes: 30 in sources.yaml; GitHub may delay runs
+    - cron: "7,37 * * * *"   # every 30 min, off the busy :00/:30 marks GitHub recommends avoiding; still best-effort
   workflow_dispatch:
   push:
     branches: [main]

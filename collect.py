@@ -55,6 +55,32 @@ def normalize_url(url):
                        urlencode(query), ""))
 
 
+def unwrap_google(url):
+    """Google Alerts wraps links in a redirect; return the real article URL.
+
+    >>> unwrap_google("https://www.google.com/url?rct=j&sa=t&url=https://ex.com/a%3Fb%3D1&ct=ga")
+    'https://ex.com/a?b=1'
+    >>> unwrap_google("https://ex.com/a")
+    'https://ex.com/a'
+    """
+    p = urlsplit(url)
+    if p.netloc.endswith("google.com") and p.path == "/url":
+        real = dict(parse_qsl(p.query)).get("url")
+        if real:
+            return real
+    return url
+
+
+def strip_html(text):
+    """Strip tags and entities, collapse whitespace.
+
+    >>> strip_html("EU <b>tariffs</b> &amp; trade")
+    'EU tariffs & trade'
+    """
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def clean_snippet(text):
     """Strip tags and entities, collapse whitespace, cap length; '' becomes None.
 
@@ -63,11 +89,22 @@ def clean_snippet(text):
     >>> clean_snippet("   ") is None
     True
     """
-    text = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
-    text = re.sub(r"\s+", " ", text).strip()
+    text = strip_html(text)
     if not text:
         return None
     return text if len(text) <= SNIPPET_MAX else text[:SNIPPET_MAX - 1].rstrip() + "…"
+
+
+def strip_publisher(title, publisher):
+    """Google News appends ' - Publisher' to every title; drop it.
+
+    >>> strip_publisher("Talks resume - Le Monde", "Le Monde")
+    'Talks resume'
+    >>> strip_publisher("Talks resume", "Le Monde")
+    'Talks resume'
+    """
+    suffix = f" - {publisher}"
+    return title[:-len(suffix)] if publisher and title.endswith(suffix) else title
 
 
 def iso(dt):
@@ -104,20 +141,25 @@ def fetch_feed(feed, fetched_at):
 
     records = []
     for e in parsed.entries:
-        link = e.get("link")
-        title = (e.get("title") or "").strip()
+        link = unwrap_google(e.get("link") or "")
+        title = strip_html(e.get("title"))
         if not link or not title:
             continue
+        source_name = feed["name"]
+        publisher = (e.get("source") or {}).get("title")
+        if publisher and "news.google.com" in feed["url"]:
+            title = strip_publisher(title, publisher)
+            source_name = f"{publisher} (via Google News)"
         url = normalize_url(link)
         records.append({
             "id": hashlib.sha1(url.encode()).hexdigest(),
             "url": link,
-            "title": html.unescape(title),
+            "title": title,
             "snippet": clean_snippet(e.get("summary")),
             "published_at": entry_date(e),
             "fetched_at": fetched_at,
             "feed_id": feed["id"],
-            "source_name": feed["name"],
+            "source_name": source_name,
             "source_country_raw": feed.get("country"),
             "tier": feed.get("tier"),
             "lang": feed.get("lang"),
@@ -173,9 +215,9 @@ def main():
     now = datetime.now(timezone.utc)
     fetched_at = iso(now)
     config = yaml.safe_load((ROOT / "sources.yaml").read_text(encoding="utf-8"))
-    # Aggregators (GDELT API, Google News query template) are not plain feeds;
-    # they belong to the local EuroLens stage-1 pipeline.
-    feeds = [f for f in config["feeds"] if f.get("tier") != "aggregator"]
+    # fetch: false marks entries that are not plain feeds (GDELT API, query templates)
+    # or are known-blocked; each carries a note saying why.
+    feeds = [f for f in config["feeds"] if f.get("fetch", True)]
 
     with ThreadPoolExecutor(max_workers=16) as pool:
         results = list(pool.map(lambda f: fetch_feed(f, fetched_at), feeds))

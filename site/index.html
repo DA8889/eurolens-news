@@ -18,6 +18,7 @@
   nav { display:flex; gap:8px; margin:12px 0; }
   nav button { background:none; border:1px solid var(--line); color:var(--fg); padding:6px 12px; border-radius:6px; cursor:pointer; }
   nav button.on { background:var(--fg); color:var(--bg); }
+  nav .addsrc { margin-left:auto; align-self:center; color:var(--accent); font-size:14px; text-decoration:none; }
   .filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
   .filters select, .filters input { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
   .filters input { flex:1; min-width:160px; }
@@ -39,10 +40,17 @@
 <main>
   <h1>EuroLens News</h1>
   <div class="muted" id="updated">Loading…</div>
-  <nav><button id="t-feed" class="on">Feed</button><button id="t-health">Health</button></nav>
+  <nav><button id="t-feed" class="on">Feed</button><button id="t-health">Health</button>
+    <a class="addsrc" href="https://github.com/DA8889/eurolens-news/issues/new?template=add-source.yml" target="_blank" rel="noopener">+ Add a source</a></nav>
 
   <section id="feed">
     <div class="filters">
+      <select id="f-when">
+        <option value="latest">Last 48 hours</option>
+        <option value="published">Published on (UTC)</option>
+        <option value="seen">Seen on (UTC)</option>
+      </select>
+      <input id="f-date" type="date" min="2026-10-06" hidden>
       <select id="f-country"><option value="">All countries</option></select>
       <select id="f-tier"><option value="">All tiers</option></select>
       <select id="f-source"><option value="">All sources</option></select>
@@ -65,10 +73,45 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt = s => new Date(s).toLocaleString(undefined, {dateStyle:"medium", timeStyle:"short"});
 const countryOf = r => (r.source_country_raw && r.source_country_raw !== "—") ? r.source_country_raw : "EU";
-let items = [];
+const ARCHIVE = "https://raw.githubusercontent.com/DA8889/eurolens-news/main/archive/";
+const sortTime = r => r.published_at || r.fetched_at;
+const addDays = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+let latest = [], items = [], scope = "from the last 48 hours";
 
 function fill(sel, values) {
+  const keep = sel.value;
+  sel.length = 1;  // keep the "All …" option
   for (const v of [...new Set(values)].sort()) sel.add(new Option(v, v));
+  sel.value = [...sel.options].some(o => o.value === keep) ? keep : "";
+}
+
+// One archive file per UTC day, named by the day the collector first saw each item.
+async function loadDay(d) {
+  const r = await fetch(`${ARCHIVE}${d.slice(0, 4)}/${d.slice(5, 7)}/${d}.jsonl`);
+  if (!r.ok) return [];
+  return (await r.text()).split("\n").filter(Boolean).map(line => JSON.parse(line));
+}
+
+async function setWhen() {
+  const mode = $("f-when").value, date = $("f-date");
+  date.hidden = mode === "latest";
+  if (mode !== "latest" && !date.value) date.value = date.max;
+  $("count").textContent = "Loading…";
+  if (mode === "latest") {
+    items = latest; scope = "from the last 48 hours";
+  } else if (mode === "seen") {
+    items = await loadDay(date.value); scope = `first seen on ${date.value}`;
+  } else {
+    // An item published on D is seen on D, or a day or two later after a gap in polling.
+    const days = await Promise.all([0, 1, 2].map(n => loadDay(addDays(date.value, n))));
+    items = days.flat().filter(r => r.published_at && r.published_at.startsWith(date.value));
+    scope = `published on ${date.value}`;
+  }
+  items.sort((a, b) => sortTime(b).localeCompare(sortTime(a)));
+  fill($("f-country"), items.map(countryOf));
+  fill($("f-tier"), items.map(r => r.tier));
+  fill($("f-source"), items.map(r => r.source_name));
+  render();
 }
 
 function render() {
@@ -77,7 +120,7 @@ function render() {
   const shown = items.filter(r =>
     (!c || countryOf(r) === c) && (!t || r.tier === t) && (!s || r.source_name === s) &&
     (!q || (r.title + " " + (r.snippet || "")).toLowerCase().includes(q)));
-  $("count").textContent = `${shown.length} of ${items.length} items from the last 48 hours`;
+  $("count").textContent = `${shown.length} of ${items.length} items ${scope}`;
   $("items").innerHTML = shown.slice(0, 500).map(r => `
     <li class="item">
       <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
@@ -95,13 +138,11 @@ function tab(name) {
 }
 
 async function load() {
-  const [latest, health] = await Promise.all(["latest.json", "health.json"].map(u => fetch(u).then(r => r.json())));
-  items = latest.items;
-  $("updated").textContent = `Updated ${fmt(latest.updated)}`;
-  fill($("f-country"), items.map(countryOf));
-  fill($("f-tier"), items.map(r => r.tier));
-  fill($("f-source"), items.map(r => r.source_name));
-  render();
+  let [latest_, health] = await Promise.all(["latest.json", "health.json"].map(u => fetch(u).then(r => r.json())));
+  $("updated").textContent = `Updated ${fmt(latest_.updated)}`;
+  $("f-date").max = latest_.updated.slice(0, 10);
+  latest = latest_.items;
+  await setWhen();
 
   const feeds = health.feeds.slice().sort((a, b) => a.ok - b.ok || a.feed_id.localeCompare(b.feed_id));
   const dead = feeds.filter(f => !f.ok).length;
@@ -111,13 +152,14 @@ async function load() {
     <td class="${f.ok ? "ok" : "bad"}">${f.ok ? "ok" : "failing"}${f.http_status ? " (" + f.http_status + ")" : ""}</td>
     <td>${f.items}</td><td>${f.new}</td><td class="muted">${esc(f.error)}</td></tr>`).join("");
 
-  const ccs = [...new Set(items.map(countryOf))].sort();
+  const ccs = [...new Set(latest.map(countryOf))].sort();
   $("feedlinks").innerHTML = `<a href="feed.xml">all sources</a>` + ccs.map(cc => `<a href="feeds/${cc}.xml">${cc}</a>`).join("");
 }
 
 $("t-feed").onclick = () => tab("feed");
 $("t-health").onclick = () => tab("health");
 for (const id of ["f-country", "f-tier", "f-source", "f-q"]) $(id).addEventListener("input", render);
+for (const id of ["f-when", "f-date"]) $(id).addEventListener("change", () => setWhen().catch(e => { $("count").textContent = "Could not load archive: " + e; }));
 load().catch(e => { $("updated").textContent = "Could not load data: " + e; });
 </script>
 </body>
