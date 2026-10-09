@@ -1,0 +1,30 @@
+name: gdelt-probe
+
+# Manual diagnostic: measures GDELT volume, 250-cap hits and 429s from GitHub's servers.
+# Writes nothing to the repo; the report appears on the run's summary page.
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: Window to measure (hours back from now)
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python gdelt.py --probe --hours "$HOURS"
+        env:
+          HOURS: ${{ inputs.hours }}
