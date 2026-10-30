@@ -4,3 +4,5 @@ __pycache__/
 site/*.json
 site/feed.xml
 site/feeds/
+exports/
+logs/
