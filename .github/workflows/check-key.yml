@@ -1,0 +1,34 @@
+name: check-key
+
+# Manual check that the OPENROUTER_API_KEY secret works and carries the expected limit.
+# Calls OpenRouter's key-info endpoint, which is free. Prints only the label, limit,
+# remaining credit and usage, never the key. Writes nothing to the repo.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Key info
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "OPENROUTER_API_KEY secret is not set" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          code=$(curl -sS -o resp.json -w '%{http_code}' \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/key)
+          if [ "$code" != "200" ]; then
+            echo "OpenRouter answered HTTP $code: $(jq -c '.error // .' resp.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          jq '.data | {label, limit, limit_remaining, limit_reset, budgets, effective_budget, usage, usage_daily, usage_weekly, usage_monthly, expires_at, is_free_tier}' resp.json \
+            > info.json
+          cat info.json
+          { echo '### OpenRouter key'; echo '```json'; cat info.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
