@@ -2,7 +2,7 @@ name: collect
 
 on:
   schedule:
-    - cron: "7,37 * * * *"   # every 30 min, off the busy :00/:30 marks GitHub recommends avoiding; still best-effort
+    - cron: "7,37 * * * *"   # backup only: GitHub starts ~5 of these a day; cron-job.org calls workflow_dispatch every 30 min
   workflow_dispatch:
   push:
     branches: [main]
@@ -20,6 +20,8 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
+    env:
+      HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}   # healthchecks.io emails if pings stop
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -41,7 +43,7 @@ jobs:
         run: |
           git config user.name "eurolens-news-bot"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add archive
+          git add archive runs
           if git diff --cached --quiet; then
             echo "No new items"
           else
@@ -56,3 +58,7 @@ jobs:
 
       - id: deploy
         uses: actions/deploy-pages@v4
+
+      - name: Ping healthchecks.io
+        if: always() && env.HEALTHCHECK_URL != ''
+        run: curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_URL${{ job.status != 'success' && '/fail' || '' }}"

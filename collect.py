@@ -8,6 +8,8 @@ Outputs:
     site/latest.json                  items from the last 48h, newest first (deployed, not committed)
     site/health.json                  per-feed status for this run
     site/feed.xml, site/feeds/CC.xml  Atom feeds: all sources, and one per country
+    runs/YYYY-MM.jsonl                one line per run: trigger, gap since the last run, failed
+                                      feeds, feeds whose items were all new (committed)
 
 Rule carried from the EuroLens spec: store link + source + short snippet only,
 never re-host full text. Missing values are null, never faked.
@@ -16,6 +18,7 @@ import calendar
 import hashlib
 import html
 import json
+import os
 import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +32,7 @@ import yaml
 
 ROOT = Path(__file__).parent
 ARCHIVE = ROOT / "archive"
+RUNS = ROOT / "runs"
 SITE = ROOT / "site"
 SITE_URL = "https://da8889.github.io/eurolens-news/"
 USER_AGENT = "EuroLensNewsBot/0.1 (+https://github.com/DA8889/eurolens-news)"
@@ -184,6 +188,35 @@ def read_archive(now, days):
     return out
 
 
+def log_run(now, fetched_at, healths, new_items):
+    """Append this run to runs/YYYY-MM.jsonl. GitHub keeps no record of scheduled runs it
+    never starts, so the gap since the previous line is the only trace of them. A feed whose
+    items were all new had rolled past its oldest unseen item: headlines may have been missed."""
+    last = None
+    files = sorted(RUNS.glob("*.jsonl"))
+    if files:
+        lines = files[-1].read_text(encoding="utf-8").splitlines()
+        last = json.loads(lines[-1])["run_at"] if lines else None
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    line = {
+        "run_at": fetched_at,
+        "trigger": os.environ.get("GITHUB_EVENT_NAME", "local"),
+        "run_url": (f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+                    f"/actions/runs/{run_id}") if run_id else None,
+        "minutes_since_last_run": round((now - datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ")
+                                         .replace(tzinfo=timezone.utc)).total_seconds() / 60)
+        if last else None,
+        "feeds_ok": sum(h["ok"] for h in healths),
+        "feeds_total": len(healths),
+        "failed_feeds": [h["feed_id"] for h in healths if not h["ok"]],
+        "new_items": new_items,
+        "possibly_missed": [h["feed_id"] for h in healths if h["items"] and h["new"] == h["items"]],
+    }
+    RUNS.mkdir(exist_ok=True)
+    with (RUNS / f"{now:%Y-%m}.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(line) + "\n")
+
+
 def sort_time(r):
     return r["published_at"] or r["fetched_at"]
 
@@ -259,6 +292,7 @@ def main():
         write_atom(SITE / "feeds" / f"{cc}.xml", f"EuroLens news: {cc}",
                    SITE_URL + f"feeds/{cc}.xml", items, fetched_at)
 
+    log_run(now, fetched_at, healths, len(new))
     ok = sum(h["ok"] for h in healths)
     print(f"{fetched_at}  feeds ok {ok}/{len(healths)}  new items {len(new)}  "
           f"latest {len(latest)}  country feeds {len(by_country)}")
