@@ -1,0 +1,14 @@
+# Calibration: prompt gate_v3, anthropic/claude-haiku-5.5 vs anthropic/claude-sonnet-5.5
+- run at 2026-11-03 19:52 UTC; headlines from calibration/gate_v1.csv
+- sample: 300 headlines; scored by both: 300 (Haiku missed 0, Sonnet missed 0)
+- **keep/drop agreement at relevance ≥6: 91.7%**
+- relevance within ±1: 90.0%; mean |diff| 0.67; Haiku mean minus Sonnet mean +0.03
+- significance within ±1: 87.7%
+- kept (≥6): Haiku 80 (26.7%), Sonnet 81 (27.0%)
+- Haiku (3 runs): $0.0152, 30 calls, 123 input and 9.1 output tokens per headline, 0 reasoning tokens
+- Sonnet (reference, reasoning low): $0.0985, 10 calls
+- review file: calibration/gate_v3_same300_r3.csv and .xlsx (disagreements first; fill your_r / your_note)
+- Haiku vs your labels: **23/30**; wrong: Spanish eviction (1) (3, you: keep); Premier League shirts (3, you: keep); Kosovo president (1, you: keep); Plague case (2, you: keep); Flemish cuts (4, you: keep); Spanish eviction (2) (4, you: keep); Meloni electoral reform (4, you: keep)
+- Sonnet vs your labels: **28/30**; wrong: Premier League shirts (4, you: keep); Flemish cuts (5, you: keep)
+- Haiku over 3 runs: kept 80, 78, 79; **keep/drop flips between runs: 24 of 300 (8.0%)**
+- Haiku vs your labels, each run: 23/30, 25/30, 24/30

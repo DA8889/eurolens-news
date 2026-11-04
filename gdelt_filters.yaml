@@ -1,0 +1,141 @@
+# Free filters for a GDELT export (gdelt_filter.py, run by gdelt_score.py). They run before
+# any AI step and only remove pages that are never EuroLens material. Rules apply in this order;
+# the first match is the reason shown on the Removed sheet. Duplicate headlines are
+# removed last. Every removed article is listed with its reason, so nothing goes unseen.
+
+max_age_hours: 72    # drop articles published more than this long before the window start
+
+# Whole sites. A domain also matches its subdomains (bild.de matches sportbild.bild.de).
+block_domains:
+  non_news:          # not news articles at all: games, job ads, TV listings, landing pages
+    - pelit.fi
+    - karriere.at
+    - tele.at
+    - tvheute.at
+    - klack.de
+    - hoerzu.de
+    - netzwelt.de
+    - newsnow.co.uk
+  aggregator:        # re-posts other outlets' stories (your decision, 2 Nov)
+    - drimble.nl
+  sports:            # sport-only sites
+    - kicker.de
+    - sport1.de
+    - spox.com
+    - ran.de
+    - transfermarkt.de
+    - transfermarkt.co.uk
+    - transfermarkt.it
+    - transfermarkt.es
+    - gazzetta.it
+    - corrieredellosport.it
+    - tuttosport.com
+    - marca.com
+    - as.com
+    - mundodeportivo.com
+    - sport.es
+    - lequipe.fr
+    - rmcsport.bfmtv.com
+    - skysports.com
+    - sportbild.bild.de
+    - sport24.gr
+    - sdna.gr
+    - gazzetta.gr
+    - sportal.bg
+    - gong.bg
+    - sport.cz
+    - isport.cz
+    - sport.pl
+    - przegladsportowy.pl
+    - sport.sk
+    - sportnet.hr
+    - sportske.net
+    - record.pt
+    - abola.pt
+    - ojogo.pt
+    - voetbalprimeur.nl
+    - voetbalzone.nl
+    - sporza.be
+    - walfoot.be
+    - laola1.at
+    - ligaportal.at
+    - sportschau.de
+    - fussballtransfers.com
+    - calciomercato.com
+    - tuttomercatoweb.com
+    - fcinternews.it
+    - milannews.it
+    - calcionapoli24.it
+    - juventusnews24.com
+    - football-italia.net
+    - goal.com
+    - onefootball.com
+    - 90min.com
+    - eurosport.de
+    - eurosport.fr
+    - eurosport.it
+    - formel1.de
+    - motorsport.com
+    - autosport.com
+  celebrity:         # celebrity, gossip and TV-guide sites
+    - gala.de
+    - bunte.de
+    - promiflash.de
+    - vip.de
+    - ok-magazin.de
+    - intouch.de
+    - closermag.fr
+    - voici.fr
+    - public.fr
+    - purepeople.com
+    - gala.fr
+    - stars-actu.fr
+    - hola.com
+    - lecturas.com
+    - semana.es
+    - diezminutos.es
+    - chi.it
+    - novella2000.it
+    - gossip.it
+    - hellomagazine.com
+    - ok.co.uk
+    - heatworld.com
+    - digitalspy.com
+    - showbiz411.com
+    - tvmovie.de
+    - prisma.de
+    - serienjunkies.de
+    - moviepilot.de
+
+# Sites whose first label marks a discussion forum, not news (keskustelu = discussion in Finnish).
+block_domain_prefixes:
+  forum: ["forum.", "forums.", "keskustelu."]
+
+# Kept on purpose, your decision 2 Nov (stock tickers and company filings that occasionally
+# carry economic news). Listed so nobody adds them to block_domains by accident.
+not_blocked:
+  - finanznachrichten.de
+  - wallstreet-online.de
+  - investegate.co.uk
+  - aktiencheck.de
+# Kept on purpose, your decision 3 Nov: an Italian aggregator that mostly re-posts other
+# outlets' news. Its crossword and horoscope pages are caught by the section_games and
+# horoscope rules; copies of other outlets' headlines are removed as duplicates.
+  - zazoom.it
+
+# Regular expressions on the URL path (lower-cased). Sport sections are deliberately NOT
+# here: your "Premier League shirts" keep was on bbc.co.uk/sport/football/.
+url_sections:
+  celebrity: '/(promi|promis|stars|people|vip|gossip|celebrity|celebrities|showbiz|boulevard|klatsch|famosos|famosi|spettacoli|unterhaltung|entertainment|tv-news)/'
+  horoscope: '/(horoskop|horoskope|horoscope|horoscopes|horoscopo|oroscopo|horoskooppi|horoszkop|horoscop|astrologie|astrology)/'
+  recipes: '/(rezepte|rezept|recipes|recipe|recettes|recette|ricette|ricetta|recetas|receta|recepten|recept|recepty|przepisy)/'
+  games: '/(games|spiele|jeux|giochi|puzzles|quiz|crossword|crosswords|sudoku|soluzioni-cruciverba|kreuzwortraetsel)/'
+  listings: '/(sendungsdetails|tv-programm|programme-tv|pour-sortir|eventi|veranstaltungen)/'
+  profile_or_tag_page: '^/(author|autor|autore|autori|auteur|persona|members|tag|tags)/[^/]+/?$'
+  date_archive_page: '^/\d{4}/\d{2}(/\d{2})?/?$'
+
+# Regular expressions on the title (lower-cased).
+titles:
+  bot_wall: '^(client challenge|just a moment|access denied|attention required|are you a robot|403 forbidden|404 not found|page not found|seite nicht gefunden|pagina non trovata|página no encontrada)\b'
+  horoscope: '\b(horoskop|horoscope|horóscopo|horoscopo|oroscopo|horoskooppi|horoszkóp|horoscop|ωροσκόπιο|sternzeichen|segno zodiacale)\b'
+  puzzles_and_lottery: '\b(lottozahlen|eurojackpot|euromillions|superenalotto|wordle|sudoku|crossword|cruciverba|kreuzworträtsel)\b'

@@ -1,0 +1,46 @@
+# The EuroLens keyword list: one entry per keyword, each with a one-line description of
+# the kinds of story it stands for. No script uses it yet. It is kept for a future
+# meaning-based filter (the first try, gdelt_topics.py, embedding similarity to these
+# descriptions, was dropped on 2026-11-02: it missed relevant stories outside the list).
+keywords:
+  election: Elections, voting, opinion polls, candidates, campaigns and election results
+  government: A national government, cabinet decisions, government policy or a government crisis
+  parliament: Parliament votes and debates, laws passed and lawmakers
+  prime minister: A prime minister's statements, decisions, visits or resignation
+  president: A president or head of state's statements, decisions, visits or election
+  minister: A government minister's announcement, policy or resignation
+  coalition: Coalition talks, coalition governments and party alliances
+  referendum: A referendum or popular vote on a political question
+  protest: Protests, demonstrations and civil unrest against the authorities
+  European Union: The European Union, EU policy, EU member states and EU decisions
+  EU: EU institutions in Brussels, the European Council, the European Parliament and EU law
+  European Commission: The European Commission, commissioners, Commission proposals and EU regulation
+  NATO: NATO, the military alliance, allied troops and collective defence
+  sanctions: Sanctions, embargoes and asset freezes against countries, companies or people
+  enlargement: EU enlargement and the accession of candidate countries such as the Western Balkans, Ukraine, Moldova and Georgia
+  summit: A summit or high-level meeting of heads of state or government
+  treaty: A treaty, international agreement or accord between countries
+  trade: International trade, trade deals, imports and exports between countries
+  tariff: Tariffs, customs duties and trade disputes
+  export: Exports, export markets and export growth or decline
+  inflation: Inflation, consumer prices and the cost of living
+  prices: Rising or falling prices for consumers, food, housing or energy
+  budget: A government or EU budget, public spending and deficits
+  tax: Taxes, tax reform, tax increases or tax cuts
+  economy: The national economy, economic growth, recession, GDP and unemployment
+  industry: Industry, manufacturing, factories, industrial output and industrial jobs
+  investment: Investment, foreign direct investment, major business deals and acquisitions
+  energy: Energy policy, energy supply and energy security
+  gas: Natural gas supply, gas prices, pipelines and LNG
+  oil: Oil supply, oil prices, crude production and OPEC
+  electricity: Electricity prices, power grids and power generation
+  fuel: Fuel prices for petrol, diesel and heating oil
+  war: War, military conflict, fighting and casualties
+  Russia: Russia, the Kremlin, Putin and Russia's relations with other countries
+  Ukraine: Ukraine, Kyiv, Zelensky and the war in Ukraine
+  defence: Defence policy, military spending, armed forces and weapons procurement
+  attack: Attacks, drone or missile strikes, terrorism and sabotage
+  migration: Migration, asylum seekers, refugees, border controls and deportations
+  housing: Housing, rents, house prices, evictions and the housing crisis
+  strike: Labour strikes, walkouts and trade union action
+  cyber: Cyberattacks, hacking, ransomware, cybersecurity and cyber defence

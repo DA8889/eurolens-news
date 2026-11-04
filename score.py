@@ -1,4 +1,4 @@
-"""Score headlines for European relevance and significance with prompt P1.
+"""Score headlines for European relevance and significance (prompt PROMPT_VERSION).
 
     python score.py [--days 3] [--budget 0.50] [--limit N]
 
@@ -25,7 +25,7 @@ import requests
 from collect import ROOT, iso
 
 MODEL = "anthropic/claude-haiku-5.5"
-PROMPT_VERSION = "gate_v1"
+PROMPT_VERSION = "gate_v3"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 CHUNK = 30
 WORKERS = 8
@@ -101,15 +101,14 @@ def parse_scores(content, n):
     return out
 
 
-def chat(model, system, user, max_tokens, reasoning=None, api_key=None):
+def chat(model, system, user, max_tokens, api_key=None):
     """One chat completion. Returns (content, finish_reason, usage). Retries transient errors."""
     body = {"model": model, "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "response_format": {"type": "json_object"},
             # Haiku 5.5 reasons by default (effort "medium"); measured live, that spent
-            # the whole output budget thinking. Reasoning bills as output, so it is off
-            # unless a caller asks for it.
-            "reasoning": reasoning or {"enabled": False},
+            # the whole output budget thinking. Reasoning bills as output, so it is off.
+            "reasoning": {"enabled": False},
             "usage": {"include": True}}
     headers = {"Authorization": f"Bearer {api_key or os.environ['OPENROUTER_API_KEY']}"}
     last = None
@@ -152,15 +151,12 @@ class Meter:
         return self.spent >= self.budget
 
 
-def score_chunk(records, system, meter, model=MODEL, retry=True, reasoning=None):
-    """Score up to CHUNK records. Returns {id: (relevance, significance)} for those scored.
-    `reasoning` is only for models that cannot turn it off (calibration's Sonnet reference)."""
+def score_chunk(records, system, meter, retry=True):
+    """Score up to CHUNK records. Returns {id: (relevance, significance)} for those scored."""
     if meter.exhausted():
         return {}
     user = "\n".join(line_for(i + 1, r) for i, r in enumerate(records))
-    # Reasoning tokens count against max_tokens, so give reasoning calls ample headroom.
-    max_tokens = 40 * len(records) + 100 if reasoning is None else 16000
-    content, finish, usage = chat(model, system, user, max_tokens, reasoning)
+    content, finish, usage = chat(MODEL, system, user, 40 * len(records) + 100)
     meter.add(usage)
     try:
         got = parse_scores(content, len(records)) if finish != "length" else {}
@@ -169,7 +165,7 @@ def score_chunk(records, system, meter, model=MODEL, retry=True, reasoning=None)
     out = {records[i - 1]["id"]: rs for i, rs in got.items()}
     missing = [r for i, r in enumerate(records, 1) if i not in got]
     if missing and retry:
-        out.update(score_chunk(missing, system, meter, model, retry=False, reasoning=reasoning))
+        out.update(score_chunk(missing, system, meter, retry=False))
     return out
 
 

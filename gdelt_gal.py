@@ -1,4 +1,4 @@
-"""Export the last 24 hours of European articles from the GDELT Article List (GAL) to xlsx.
+"""Download the last 24 hours of European articles from the GDELT Article List (GAL).
 
     python gdelt_gal.py                 # the latest 24 hours GDELT has published
     python gdelt_gal.py --hours 1       # shorter window for a quick test
@@ -17,9 +17,13 @@ The GAL has no source-country field, so the country comes from the outlet's doma
 its country ending (.de -> DE, .gr -> EL, .co.uk -> GB, .eu -> EU) or, for European
 outlets on generic domains like .com, the KNOWN_OUTLETS table below.
 
-Outputs (both git-ignored):
-    exports/gdelt_gal_<start>_<hours>h.xlsx   sheets: Articles, Summary
-    logs/gdelt_gal_<timestamp>.log            DEBUG log: every request, status, size, error
+Outputs (all git-ignored):
+    exports/gdelt_gal_<start>_<hours>h.jsonl.gz       European articles, full GAL records plus
+                                                      seen_in_file, source_country, country_basis
+                                                      (input for gdelt_score.py, which writes the
+                                                      one workbook for the day)
+    exports/gdelt_gal_<start>_<hours>h_download.json  window, files found/missing/failed, counts
+    logs/gdelt_gal_<timestamp>.log               DEBUG log: every request, status, size, error
 """
 import argparse
 import gzip
@@ -33,8 +37,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
-from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.utils import get_column_letter
 
 ROOT = Path(__file__).parent
 BASE = "https://data.gdeltproject.org/gdeltv3/gal/"
@@ -158,6 +162,17 @@ def clean(value):
     return ILLEGAL_CHARACTERS_RE.sub("", str(value))
 
 
+def add_sheet(wb, name, header, rows):
+    """Write-only sheet with a frozen, filterable header row; text cleaned for Excel."""
+    ws = wb.create_sheet(name)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(header))}{len(rows) + 1}"
+    ws.append(header)
+    for row in rows:
+        ws.append([clean(v) if isinstance(v, str) else v for v in row])
+    return ws
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--hours", type=float, default=24)
@@ -196,7 +211,7 @@ def main():
         log.error("no GAL files found in the window; nothing to export (see %s)", log_path)
         sys.exit(1)
 
-    seen_urls, total, rows, countries, basis = set(), 0, [], Counter(), Counter()
+    seen_urls, total, full, basis = set(), 0, [], Counter()
     for minute, records, _ in results:
         for r in records:
             total += 1
@@ -207,39 +222,31 @@ def main():
             cc, how = country_of(r.get("domain"))
             if not cc:
                 continue
-            countries[cc] += 1
             basis[how] += 1
-            rows.append([r.get("date"), f"{minute:%Y-%m-%dT%H:%M}Z", cc, how,
-                         r.get("outletName"), r.get("domain"), r.get("lang"),
-                         r.get("title"), r.get("desc"), r.get("author"), url])
-    with_desc = sum(1 for row in rows if row[8])
+            full.append({**r, "seen_in_file": f"{minute:%Y-%m-%dT%H:%M}Z",
+                         "source_country": cc, "country_basis": how})
+    with_desc = sum(1 for r in full if r.get("desc"))
     log.info("records %d, unique urls %d, European %d (%d with a description)",
-             total, len(seen_urls), len(rows), with_desc)
+             total, len(seen_urls), len(full), with_desc)
 
-    out = ROOT / "exports" / f"gdelt_gal_{start:%Y%m%dT%H%M}Z_{a.hours:g}h.xlsx"
-    t1 = time.monotonic()
-    wb = Workbook(write_only=True)
-    ws = wb.create_sheet("Articles")
-    ws.append(["published", "seen_in_file", "source_country", "country_basis", "outlet",
-               "domain", "language", "title", "description", "author", "url"])
-    for row in rows:
-        ws.append([clean(v) for v in row])
-    sm = wb.create_sheet("Summary")
-    for line in [
-        ["window_start_utc", f"{start:%Y-%m-%d %H:%M}"], ["window_end_utc", f"{end:%Y-%m-%d %H:%M}"],
-        ["minutes_checked", len(minutes)], ["files_found", status["ok"]],
-        ["minutes_without_file", status["missing"]],
-        ["files_failed", len(minutes) - status["ok"] - status["missing"]],
-        ["fetch_seconds", round(fetch_s)], ["records_total", total], ["unique_urls", len(seen_urls)],
-        ["european_articles", len(rows)], ["european_with_description", with_desc],
-        ["country_from_tld", basis["tld"]], ["country_from_known_outlet", basis["known_outlet"]],
-        [], ["source_country", "articles"], *sorted(countries.items(), key=lambda kv: -kv[1]),
-        [], ["log_file", str(log_path.relative_to(ROOT))],
-    ]:
-        sm.append(line)
-    wb.save(out)
-    log.info("wrote %s (%.1f MB) in %.0fs", out.relative_to(ROOT),
-             out.stat().st_size / 1e6, time.monotonic() - t1)
+    stem = ROOT / "exports" / f"gdelt_gal_{start:%Y%m%dT%H%M}Z_{a.hours:g}h"
+    out_jsonl = stem.with_name(f"{stem.name}.jsonl.gz")
+    with gzip.open(out_jsonl, "wt", encoding="utf-8") as f:
+        f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in full)
+    log.info("wrote %s (%.1f MB)", out_jsonl.relative_to(ROOT), out_jsonl.stat().st_size / 1e6)
+    download = {
+        "window_start_utc": f"{start:%Y-%m-%d %H:%M}", "window_end_utc": f"{end:%Y-%m-%d %H:%M}",
+        "minutes_checked": len(minutes), "files_found": status["ok"],
+        "minutes_without_file": status["missing"],
+        "files_failed": len(minutes) - status["ok"] - status["missing"],
+        "fetch_seconds": round(fetch_s), "records_total": total, "unique_urls": len(seen_urls),
+        "european_articles": len(full), "european_with_description": with_desc,
+        "country_from_tld": basis["tld"], "country_from_known_outlet": basis["known_outlet"],
+        "log_file": str(log_path.relative_to(ROOT)),
+    }
+    out_download = stem.with_name(f"{stem.name}_download.json")
+    out_download.write_text(json.dumps(download, indent=1), encoding="utf-8")
+    log.info("wrote %s", out_download.relative_to(ROOT))
     log.info("log: %s", log_path.relative_to(ROOT))
 
 
