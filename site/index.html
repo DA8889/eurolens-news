@@ -36,13 +36,18 @@
   .tablewrap { overflow-x:auto; }
   .tag.hi { border-color:var(--accent); color:var(--accent); }
   #scoring th { width:180px; font-weight:600; }
+  details { margin-top:6px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  ul.members { margin:6px 0 0; padding-left:14px; border-left:2px solid var(--line); }
+  ul.members li { margin:4px 0; font-size:14px; }
+  ul.members a { font-weight:400 !important; }
 </style>
 </head>
 <body>
 <main>
   <h1>EuroLens News</h1>
   <div class="muted" id="updated">Loading…</div>
-  <nav><button id="t-feed" class="on">Feed</button><button id="t-health">Health</button><button id="t-scoring">Scoring</button>
+  <nav><button id="t-feed" class="on">Feed</button><button id="t-events">Events</button><button id="t-health">Health</button><button id="t-scoring">Scoring</button>
     <a class="addsrc" href="https://github.com/DA8889/eurolens-news/issues/new?template=add-source.yml" target="_blank" rel="noopener">+ Add a source</a></nav>
 
   <section id="feed">
@@ -64,6 +69,15 @@
     </div>
     <div class="muted" id="count"></div>
     <ul id="items"></ul>
+  </section>
+
+  <section id="events" hidden>
+    <div class="filters">
+      <select id="e-country"><option value="">All countries</option></select>
+      <input id="e-q" type="search" placeholder="Search event headlines">
+    </div>
+    <div class="muted" id="e-count">Events are switched off: they need relevance scores.</div>
+    <ul id="e-items"></ul>
   </section>
 
   <section id="health" hidden>
@@ -162,7 +176,7 @@ function render() {
 }
 
 function tab(name) {
-  for (const t of ["feed", "health", "scoring"]) {
+  for (const t of ["feed", "events", "health", "scoring"]) {
     $(t).hidden = t !== name; $("t-" + t).classList.toggle("on", t === name);
   }
 }
@@ -187,6 +201,38 @@ function showScoring(st) {
   Items without a badge are not scored yet.</p>`;
 }
 
+// site/events.json exists only when cluster.py ran in this deployment (scoring switched on).
+// Each event groups headlines about the same story; its title is one of its own headlines.
+let events = [], eventsWindow = 72;
+function renderEvents() {
+  const c = $("e-country").value, q = $("e-q").value.trim().toLowerCase();
+  const shown = events.filter(e => (!c || e.countries.includes(c)) &&
+    (!q || e.members.some(m => m.title.toLowerCase().includes(q))));
+  $("e-count").textContent = `${shown.length} of ${events.length} events from the last ${eventsWindow} hours, ` +
+    "ranked by significance and by how many countries cover them";
+  $("e-items").innerHTML = shown.map(e => `
+    <li class="item">
+      <a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>
+      <div class="meta muted">
+        Covered by ${e.outlets} outlets${e.countries.length ? ` in ${e.countries.length} ${e.countries.length === 1 ? "country" : "countries"}` : ""}
+        ${e.countries.map(cc => `<span class="tag">${esc(cc)}</span>`).join("")}
+        <span class="tag${e.relevance >= RELEVANT_MIN ? " hi" : ""}" title="Best scores among its headlines, 0 to 10">Relevance ${e.relevance} · Significance ${e.significance}</span>
+        first seen ${fmt(e.first_seen)}
+      </div>
+      <details><summary>Show all ${e.articles} headlines</summary><ul class="members">
+        ${e.members.map(m => `<li><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>
+          <span class="muted">${esc(m.source_name)} · ${esc(countryOf(m))} · ${fmt(m.published_at || m.fetched_at)}</span></li>`).join("")}
+      </ul></details>
+    </li>`).join("");
+}
+function showEvents(ev) {
+  $("t-events").textContent = ev ? "Events" : "Events (off)";
+  if (!ev) return;
+  events = ev.events; eventsWindow = ev.window_hours;
+  fill($("e-country"), events.flatMap(e => e.countries));
+  renderEvents();
+}
+
 async function load() {
   let [latest_, health] = await Promise.all(["latest.json", "health.json"].map(u => fetch(u).then(r => r.json())));
   $("updated").textContent = `Updated ${fmt(latest_.updated)}`;
@@ -209,9 +255,12 @@ async function load() {
       : "");
 
   showScoring(await fetch("scoring.json").then(r => r.ok ? r.json() : null).catch(() => null));
+  showEvents(await fetch("events.json").then(r => r.ok ? r.json() : null).catch(() => null));
 }
 
 $("t-feed").onclick = () => tab("feed");
+$("t-events").onclick = () => tab("events");
+for (const id of ["e-country", "e-q"]) $(id).addEventListener("input", renderEvents);
 $("t-health").onclick = () => tab("health");
 $("t-scoring").onclick = () => tab("scoring");
 for (const id of ["f-view", "f-country", "f-tier", "f-source", "f-q"]) $(id).addEventListener("input", render);
