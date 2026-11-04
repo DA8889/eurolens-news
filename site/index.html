@@ -34,17 +34,23 @@
   .bad { color:var(--bad); } .ok { color:var(--ok); }
   .feeds a { color:var(--accent); margin-right:8px; font-size:13px; }
   .tablewrap { overflow-x:auto; }
+  .tag.hi { border-color:var(--accent); color:var(--accent); }
+  #scoring th { width:180px; font-weight:600; }
 </style>
 </head>
 <body>
 <main>
   <h1>EuroLens News</h1>
   <div class="muted" id="updated">Loading…</div>
-  <nav><button id="t-feed" class="on">Feed</button><button id="t-health">Health</button>
+  <nav><button id="t-feed" class="on">Feed</button><button id="t-health">Health</button><button id="t-scoring">Scoring</button>
     <a class="addsrc" href="https://github.com/DA8889/eurolens-news/issues/new?template=add-source.yml" target="_blank" rel="noopener">+ Add a source</a></nav>
 
   <section id="feed">
     <div class="filters">
+      <select id="f-view" hidden>
+        <option value="latest">Latest</option>
+        <option value="relevant">Most relevant</option>
+      </select>
       <select id="f-when">
         <option value="latest">Last 48 hours</option>
         <option value="published">Published on (UTC)</option>
@@ -67,6 +73,10 @@
       <tbody id="hrows"></tbody>
     </table></div>
   </section>
+
+  <section id="scoring" hidden>
+    <div id="scoring-body"><p class="muted">Relevance scores are switched off.</p></div>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -74,6 +84,8 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 const fmt = s => new Date(s).toLocaleString(undefined, {dateStyle:"medium", timeStyle:"short"});
 const countryOf = r => (r.source_country_raw && r.source_country_raw !== "—") ? r.source_country_raw : "EU";
 const ARCHIVE = "https://raw.githubusercontent.com/DA8889/eurolens-news/main/archive/";
+const SCORES = "https://raw.githubusercontent.com/DA8889/eurolens-news/main/scores/";
+const RELEVANT_MIN = 6;  // "Most relevant": relevance 6 or above
 const sortTime = r => r.published_at || r.fetched_at;
 const addDays = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
 let latest = [], items = [], scope = "from the last 48 hours";
@@ -85,11 +97,20 @@ function fill(sel, values) {
   sel.value = [...sel.options].some(o => o.value === keep) ? keep : "";
 }
 
-// One archive file per UTC day, named by the day the collector first saw each item.
+// One archive file per UTC day, named by the day the collector first saw each item;
+// scores/ has a file for the same day once scoring is on. Unscored items get null, never 0.
 async function loadDay(d) {
-  const r = await fetch(`${ARCHIVE}${d.slice(0, 4)}/${d.slice(5, 7)}/${d}.jsonl`);
-  if (!r.ok) return [];
-  return (await r.text()).split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const path = `${d.slice(0, 4)}/${d.slice(5, 7)}/${d}.jsonl`;
+  const [items, scores] = await Promise.all([ARCHIVE, SCORES].map(async base => {
+    const r = await fetch(base + path);
+    return r.ok ? (await r.text()).split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+  }));
+  const byId = new Map(scores.map(s => [s.id, s]));
+  for (const r of items) {
+    const s = byId.get(r.id);
+    r.relevance = s ? s.relevance : null; r.significance = s ? s.significance : null;
+  }
+  return items;
 }
 
 async function setWhen() {
@@ -108,6 +129,7 @@ async function setWhen() {
     scope = `published on ${date.value}`;
   }
   items.sort((a, b) => sortTime(b).localeCompare(sortTime(a)));
+  $("f-view").hidden = !items.some(r => r.relevance != null);
   fill($("f-country"), items.map(countryOf));
   fill($("f-tier"), items.map(r => r.tier));
   fill($("f-source"), items.map(r => r.source_name));
@@ -117,24 +139,52 @@ async function setWhen() {
 function render() {
   const c = $("f-country").value, t = $("f-tier").value, s = $("f-source").value;
   const q = $("f-q").value.trim().toLowerCase();
-  const shown = items.filter(r =>
+  const relevant = !$("f-view").hidden && $("f-view").value === "relevant";
+  let shown = items.filter(r =>
     (!c || countryOf(r) === c) && (!t || r.tier === t) && (!s || r.source_name === s) &&
     (!q || (r.title + " " + (r.snippet || "")).toLowerCase().includes(q)));
-  $("count").textContent = `${shown.length} of ${items.length} items ${scope}`;
+  if (relevant) {
+    shown = shown.filter(r => r.relevance != null && r.relevance >= RELEVANT_MIN).sort((a, b) =>
+      (b.relevance + b.significance) - (a.relevance + a.significance) || sortTime(b).localeCompare(sortTime(a)));
+  }
+  $("count").textContent = `${shown.length} of ${items.length} items ${scope}` +
+    (relevant ? `, relevance ${RELEVANT_MIN} or above, ranked by relevance + significance` : "");
   $("items").innerHTML = shown.slice(0, 500).map(r => `
     <li class="item">
       <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
       ${r.snippet ? `<p class="snip">${esc(r.snippet)}</p>` : ""}
       <div class="meta muted">
         <span class="tag">${esc(countryOf(r))}</span><span class="tag">${esc(r.tier)}</span>
+        ${r.relevance != null ? `<span class="tag${r.relevance >= RELEVANT_MIN ? " hi" : ""}" title="Scored by AI from the headline, 0 to 10">Relevance ${r.relevance} · Significance ${r.significance}</span>` : ""}
         ${esc(r.source_name)} · ${r.published_at ? fmt(r.published_at) : "fetched " + fmt(r.fetched_at)}
       </div>
     </li>`).join("");
 }
 
 function tab(name) {
-  $("feed").hidden = name !== "feed"; $("health").hidden = name !== "health";
-  $("t-feed").classList.toggle("on", name === "feed"); $("t-health").classList.toggle("on", name === "health");
+  for (const t of ["feed", "health", "scoring"]) {
+    $(t).hidden = t !== name; $("t-" + t).classList.toggle("on", t === name);
+  }
+}
+
+// site/scoring.json exists only when score.py ran in this deployment (scoring switched on).
+function showScoring(st) {
+  $("t-scoring").textContent = st ? "Scoring" : "Scoring (off)";
+  if (!st) return;
+  const run = st.last_run || {};
+  const usd = x => "$" + Number(x).toFixed(2);
+  const last = run.skipped ? `skipped: ${esc(run.skipped)}`
+    : `${run.scored} scored, ${run.unscored} left unscored${run.budget_hit ? " (run budget reached)" : ""}`;
+  $("scoring-body").innerHTML = `<div class="tablewrap"><table><tbody>
+    <tr><th>Model</th><td>${esc(st.model)}</td></tr>
+    <tr><th>Prompt</th><td>${esc(st.prompt)}</td></tr>
+    <tr><th>Cost today (UTC)</th><td>${usd(st.cost_today_usd)} of ${usd(st.daily_budget_usd)} daily limit</td></tr>
+    <tr><th>Cost, last 7 days</th><td>${usd(st.cost_7d_usd)}</td></tr>
+    <tr><th>Last run</th><td>${fmt(run.run_at)}: ${last}</td></tr>
+  </tbody></table></div>
+  <p class="muted">Each headline is scored once, from the headline alone, for relevance to Europe and
+  for significance, both 0 to 10. "Most relevant" shows relevance ${RELEVANT_MIN} or above.
+  Items without a badge are not scored yet.</p>`;
 }
 
 async function load() {
@@ -153,12 +203,18 @@ async function load() {
     <td>${f.items}</td><td>${f.new}</td><td class="muted">${esc(f.error)}</td></tr>`).join("");
 
   const ccs = [...new Set(latest.map(countryOf))].sort();
-  $("feedlinks").innerHTML = `<a href="feed.xml">all sources</a>` + ccs.map(cc => `<a href="feeds/${cc}.xml">${cc}</a>`).join("");
+  $("feedlinks").innerHTML = `<a href="feed.xml">all sources</a>` + ccs.map(cc => `<a href="feeds/${cc}.xml">${cc}</a>`).join("") +
+    (latest.some(r => r.relevance != null)
+      ? `<br>Most relevant only: <a href="relevant.xml">all sources</a>` + ccs.map(cc => `<a href="feeds/${cc}-relevant.xml">${cc}</a>`).join("")
+      : "");
+
+  showScoring(await fetch("scoring.json").then(r => r.ok ? r.json() : null).catch(() => null));
 }
 
 $("t-feed").onclick = () => tab("feed");
 $("t-health").onclick = () => tab("health");
-for (const id of ["f-country", "f-tier", "f-source", "f-q"]) $(id).addEventListener("input", render);
+$("t-scoring").onclick = () => tab("scoring");
+for (const id of ["f-view", "f-country", "f-tier", "f-source", "f-q"]) $(id).addEventListener("input", render);
 for (const id of ["f-when", "f-date"]) $(id).addEventListener("change", () => setWhen().catch(e => { $("count").textContent = "Could not load archive: " + e; }));
 load().catch(e => { $("updated").textContent = "Could not load data: " + e; });
 </script>

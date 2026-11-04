@@ -5,9 +5,12 @@ Run by .github/workflows/collect.yml every 30 minutes; also runnable locally:
 
 Outputs:
     archive/YYYY/MM/YYYY-MM-DD.jsonl  append-only, one record per new item (committed)
-    site/latest.json                  items from the last 48h, newest first (deployed, not committed)
+    site/latest.json                  items from the last 48h, newest first, with relevance and
+                                      significance from scores/ (deployed, not committed)
     site/health.json                  per-feed status for this run
     site/feed.xml, site/feeds/CC.xml  Atom feeds: all sources, and one per country
+    site/relevant.xml, feeds/CC-relevant.xml
+                                      the same, relevance >= 6 only (once score.py has run)
     runs/YYYY-MM.jsonl                one line per run: trigger, gap since the last run, failed
                                       feeds, feeds whose items were all new (committed)
 
@@ -33,6 +36,7 @@ import yaml
 ROOT = Path(__file__).parent
 ARCHIVE = ROOT / "archive"
 RUNS = ROOT / "runs"
+SCORES = ROOT / "scores"   # written by score.py, same day-file layout as archive/
 SITE = ROOT / "site"
 SITE_URL = "https://da8889.github.io/eurolens-news/"
 USER_AGENT = "EuroLensNewsBot/0.1 (+https://github.com/DA8889/eurolens-news)"
@@ -40,6 +44,7 @@ SNIPPET_MAX = 300
 SEEN_DAYS = 7          # cross-run dedup window
 LATEST_HOURS = 48      # window for the web page and Atom feeds
 ATOM_ALL_MAX = 500     # cap for the all-sources feed
+RELEVANT_MIN = 6       # relevance >= this is "Most relevant" (same threshold as calibration)
 TIMEOUT = 20
 
 ATOM = "http://www.w3.org/2005/Atom"
@@ -174,14 +179,15 @@ def fetch_feed(feed, fetched_at):
     return records, health
 
 
-def archive_path(day):
-    return ARCHIVE / f"{day:%Y}" / f"{day:%m}" / f"{day:%Y-%m-%d}.jsonl"
+def archive_path(day, base=ARCHIVE):
+    return base / f"{day:%Y}" / f"{day:%m}" / f"{day:%Y-%m-%d}.jsonl"
 
 
-def read_archive(now, days):
+def read_archive(now, days, base=ARCHIVE):
+    """Records from the last `days` day files under `base` (archive/, or scores/ with the same layout)."""
     out = []
     for d in range(days):
-        path = archive_path(now - timedelta(days=d))
+        path = archive_path(now - timedelta(days=d), base)
         if path.exists():
             with path.open(encoding="utf-8") as f:
                 out.extend(json.loads(line) for line in f if line.strip())
@@ -244,6 +250,41 @@ def write_atom(path, title, self_url, items, updated):
     ET.ElementTree(feed).write(path, encoding="utf-8", xml_declaration=True)
 
 
+def build_site(now):
+    """Write latest.json and the Atom feeds from the last LATEST_HOURS of archive, each item
+    carrying its scores from scores/ (null when unscored, never 0). The most-relevant feeds
+    are written only once scores exist. score.py calls this again after scoring a run."""
+    updated = iso(now)
+    cutoff = iso(now - timedelta(hours=LATEST_HOURS))
+    scores = {s["id"]: s for s in read_archive(now, 3, SCORES)}
+    latest = sorted((r for r in read_archive(now, 3) if sort_time(r) >= cutoff),
+                    key=sort_time, reverse=True)
+    for r in latest:
+        s = scores.get(r["id"], {})
+        r["relevance"], r["significance"] = s.get("relevance"), s.get("significance")
+    relevant = lambda items: [r for r in items if r["relevance"] is not None and r["relevance"] >= RELEVANT_MIN]
+
+    SITE.mkdir(exist_ok=True)
+    (SITE / "latest.json").write_text(json.dumps(
+        {"updated": updated, "items": latest}, ensure_ascii=False), encoding="utf-8")
+    write_atom(SITE / "feed.xml", "EuroLens news: all sources", SITE_URL + "feed.xml",
+               latest[:ATOM_ALL_MAX], updated)
+    if scores:
+        write_atom(SITE / "relevant.xml", "EuroLens news: most relevant", SITE_URL + "relevant.xml",
+                   relevant(latest)[:ATOM_ALL_MAX], updated)
+    by_country = {}
+    for r in latest:
+        cc = r["source_country_raw"]
+        by_country.setdefault("EU" if cc in (None, "—") else cc, []).append(r)
+    for cc, items in by_country.items():
+        write_atom(SITE / "feeds" / f"{cc}.xml", f"EuroLens news: {cc}",
+                   SITE_URL + f"feeds/{cc}.xml", items, updated)
+        if scores:
+            write_atom(SITE / "feeds" / f"{cc}-relevant.xml", f"EuroLens news: {cc}, most relevant",
+                       SITE_URL + f"feeds/{cc}-relevant.xml", relevant(items), updated)
+    return latest, by_country
+
+
 def main():
     now = datetime.now(timezone.utc)
     fetched_at = iso(now)
@@ -271,26 +312,11 @@ def main():
             for r in new:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    cutoff = iso(now - timedelta(hours=LATEST_HOURS))
-    latest = sorted((r for r in read_archive(now, 3) if sort_time(r) >= cutoff),
-                    key=sort_time, reverse=True)
     healths = [h for _, h in results]
-
     SITE.mkdir(exist_ok=True)
-    (SITE / "latest.json").write_text(json.dumps(
-        {"updated": fetched_at, "items": latest}, ensure_ascii=False), encoding="utf-8")
     (SITE / "health.json").write_text(json.dumps(
         {"updated": fetched_at, "feeds": healths}, ensure_ascii=False, indent=1), encoding="utf-8")
-
-    write_atom(SITE / "feed.xml", "EuroLens news: all sources", SITE_URL + "feed.xml",
-               latest[:ATOM_ALL_MAX], fetched_at)
-    by_country = {}
-    for r in latest:
-        cc = r["source_country_raw"]
-        by_country.setdefault("EU" if cc in (None, "—") else cc, []).append(r)
-    for cc, items in by_country.items():
-        write_atom(SITE / "feeds" / f"{cc}.xml", f"EuroLens news: {cc}",
-                   SITE_URL + f"feeds/{cc}.xml", items, fetched_at)
+    latest, by_country = build_site(now)
 
     log_run(now, fetched_at, healths, len(new))
     ok = sum(h["ok"] for h in healths)

@@ -1,13 +1,16 @@
 """Score headlines for European relevance and significance (prompt PROMPT_VERSION).
 
-    python score.py [--days 3] [--budget 0.50] [--limit N]
+    python score.py [--days 3] [--budget 0.20] [--limit N]
 
 Reads RSS (archive/) and GDELT (gdelt/) records from the last --days archive days,
 skips ids already scored, and appends one line per item to
 scores/YYYY/MM/<item's archive day>.jsonl:
     {"id", "relevance", "significance", "model", "prompt", "scored_at"}
 An item the model fails to score is left unscored and retried next run, never given 0.
+Then rebuilds the site (collect.build_site) so this run's scores show at once, and writes
+site/scoring.json (cost today and over 7 days, prompt, model, last run) for the Scoring tab.
 Needs OPENROUTER_API_KEY; without it this exits 0 with a message, so collection never breaks.
+In collect.yml this runs only when the repository variable SCORING is "on".
 """
 import argparse
 import json
@@ -22,15 +25,15 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from collect import ROOT, iso
+from collect import ROOT, SITE, build_site, iso
 
 MODEL = "anthropic/claude-haiku-5.5"
 PROMPT_VERSION = "gate_v3"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 CHUNK = 30
 WORKERS = 8
-RUN_BUDGET = 0.50    # USD per run
-DAILY_BUDGET = 2.00  # USD per UTC day, summed from scores/costs.jsonl
+RUN_BUDGET = 0.20    # USD per run; RSS alone is about $0.11 a day (~6,900 headlines)
+DAILY_BUDGET = 0.50  # USD per UTC day, summed from scores/costs.jsonl
 SOURCES = ("archive", "gdelt")   # RSS and GDELT records, same shape
 SCORES = ROOT / "scores"
 COSTS = SCORES / "costs.jsonl"
@@ -192,11 +195,27 @@ def read_days(base, days):
     return out
 
 
-def spent_today(today):
+def read_costs():
     if not COSTS.exists():
-        return 0.0
+        return []
     with COSTS.open(encoding="utf-8") as f:
-        return sum(json.loads(l)["cost"] for l in f if l.strip() and json.loads(l)["date"] == today)
+        return [json.loads(l) for l in f if l.strip()]
+
+
+def spent_today(today):
+    return sum(c["cost"] for c in read_costs() if c["date"] == today)
+
+
+def write_status(now, last_run):
+    """site/scoring.json for the Scoring tab (deployed, not committed)."""
+    week = {(now - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(7)}
+    costs = read_costs()
+    status = {"updated": iso(now), "model": MODEL, "prompt": PROMPT_VERSION,
+              "cost_today_usd": round(sum(c["cost"] for c in costs if c["date"] == now.strftime("%Y-%m-%d")), 4),
+              "cost_7d_usd": round(sum(c["cost"] for c in costs if c["date"] in week), 4),
+              "daily_budget_usd": DAILY_BUDGET, "last_run": last_run}
+    SITE.mkdir(exist_ok=True)
+    (SITE / "scoring.json").write_text(json.dumps(status, indent=1), encoding="utf-8")
 
 
 def main():
@@ -215,6 +234,7 @@ def main():
     budget = min(a.budget, DAILY_BUDGET - spent_today(today))
     if budget <= 0:
         print(f"score: daily budget ${DAILY_BUDGET:.2f} reached, skipping")
+        write_status(now, {"run_at": iso(now), "skipped": "daily budget reached"})
         return
 
     scored = {s["id"] for s in read_days("scores", days + [(now + timedelta(days=1)).strftime("%Y-%m-%d")])}
@@ -259,6 +279,8 @@ def main():
     with COSTS.open("a", encoding="utf-8") as f:
         f.write(json.dumps(run) + "\n")
     print("score:", json.dumps(run))
+    build_site(now)
+    write_status(now, run)
 
 
 if __name__ == "__main__":
