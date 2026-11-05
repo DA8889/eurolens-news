@@ -41,13 +41,27 @@
   ul.members { margin:6px 0 0; padding-left:14px; border-left:2px solid var(--line); }
   ul.members li { margin:4px 0; font-size:14px; }
   ul.members a { font-weight:400 !important; }
+  .tag.strand { border-color:var(--ok); color:var(--ok); }
+  .orig { font-size:13px; margin-top:2px; }
+  .kicker { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  li.story { border-left:3px solid var(--accent); }
+  ul.lead { margin:6px 0 0; }
+  ul.lead li { margin:4px 0; }
+  ul.lead a, ul.events a { font-weight:400 !important; }
+  ul.events { margin:6px 0 0; }
+  ul.events li.item { margin:6px 0; }
+  .spark { display:flex; align-items:flex-end; gap:1px; height:24px; width:180px; margin:6px 0 2px; }
+  .spark i { flex:1; background:var(--accent); opacity:.65; min-height:1px; }
+  .follow { font-size:13px; color:var(--accent); text-decoration:none; margin-left:6px; }
+  h2 { font-size:16px; margin:18px 0 8px; }
+  .day { font-size:13px; font-weight:600; margin:8px 0 2px; }
 </style>
 </head>
 <body>
 <main>
   <h1>EuroLens News</h1>
   <div class="muted" id="updated">Loading…</div>
-  <nav><button id="t-feed" class="on">Feed</button><button id="t-events">Events</button><button id="t-health">Health</button><button id="t-scoring">Scoring</button>
+  <nav><button id="t-feed" class="on">Feed</button><button id="t-events">Events</button><button id="t-stories">Stories</button><button id="t-health">Health</button><button id="t-scoring">Scoring</button>
     <a class="addsrc" href="https://github.com/DA8889/eurolens-news/issues/new?template=add-source.yml" target="_blank" rel="noopener">+ Add a source</a></nav>
 
   <section id="feed">
@@ -80,6 +94,19 @@
     <ul id="e-items"></ul>
   </section>
 
+  <section id="stories" hidden>
+    <div class="filters">
+      <input id="s-q" type="search" placeholder="Search storylines and strands">
+    </div>
+    <div class="muted" id="s-count">Storylines are switched off: they need relevance scores.</div>
+    <h2>Developing</h2>
+    <div class="muted">Related events grouped into storylines, newest activity first. Names are written by AI from the event headlines.</div>
+    <ul id="s-items"></ul>
+    <h2>Followed</h2>
+    <div class="muted">Strands you follow (strands.yaml): headlines AI matched to each, including small and single-outlet stories.</div>
+    <ul id="s-strands"></ul>
+  </section>
+
   <section id="health" hidden>
     <p class="feeds muted">Feed reader URLs: <span id="feedlinks"></span></p>
     <div class="tablewrap"><table>
@@ -99,10 +126,13 @@ const fmt = s => new Date(s).toLocaleString(undefined, {dateStyle:"medium", time
 const countryOf = r => (r.source_country_raw && r.source_country_raw !== "—") ? r.source_country_raw : "EU";
 const ARCHIVE = "https://raw.githubusercontent.com/DA8889/eurolens-news/main/archive/";
 const SCORES = "https://raw.githubusercontent.com/DA8889/eurolens-news/main/scores/";
+const TAGS = "https://raw.githubusercontent.com/DA8889/eurolens-news/main/tags/";
 const RELEVANT_MIN = 6;  // "Most relevant": relevance 6 or above
 const sortTime = r => r.published_at || r.fetched_at;
 const addDays = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
 let latest = [], items = [], scope = "from the last 48 hours";
+let tagRule = null, strandName = {};   // tags/progress.json; strand id -> name (from stories.json)
+const inStrands = r => r.strands && r.strands.length > 0;
 
 function fill(sel, values) {
   const keep = sel.value;
@@ -113,16 +143,22 @@ function fill(sel, values) {
 
 // One archive file per UTC day, named by the day the collector first saw each item;
 // scores/ has a file for the same day once scoring is on. Unscored items get null, never 0.
+// tags/ likewise, by the same rule as collect.read_tags (current strands version, or older
+// than its back-fill; the latest line wins).
 async function loadDay(d) {
   const path = `${d.slice(0, 4)}/${d.slice(5, 7)}/${d}.jsonl`;
-  const [items, scores] = await Promise.all([ARCHIVE, SCORES].map(async base => {
+  const [items, scores, tags] = await Promise.all([ARCHIVE, SCORES, TAGS].map(async base => {
+    if (base === TAGS && !tagRule) return [];
     const r = await fetch(base + path);
     return r.ok ? (await r.text()).split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
   }));
   const byId = new Map(scores.map(s => [s.id, s]));
+  const strands = new Map(tags.filter(l => l.version === tagRule.version || l.fetched_at < tagRule.since)
+    .map(l => [l.id, l.strands]));
   for (const r of items) {
     const s = byId.get(r.id);
     r.relevance = s ? s.relevance : null; r.significance = s ? s.significance : null;
+    r.strands = strands.get(r.id) || [];
   }
   return items;
 }
@@ -158,11 +194,11 @@ function render() {
     (!c || countryOf(r) === c) && (!t || r.tier === t) && (!s || r.source_name === s) &&
     (!q || (r.title + " " + (r.snippet || "")).toLowerCase().includes(q)));
   if (relevant) {
-    shown = shown.filter(r => r.relevance != null && r.relevance >= RELEVANT_MIN).sort((a, b) =>
+    shown = shown.filter(r => inStrands(r) || (r.relevance != null && r.relevance >= RELEVANT_MIN)).sort((a, b) =>
       (b.relevance + b.significance) - (a.relevance + a.significance) || sortTime(b).localeCompare(sortTime(a)));
   }
   $("count").textContent = `${shown.length} of ${items.length} items ${scope}` +
-    (relevant ? `, relevance ${RELEVANT_MIN} or above, ranked by relevance + significance` : "");
+    (relevant ? `, relevance ${RELEVANT_MIN} or above or in a strand you follow, ranked by relevance + significance` : "");
   $("items").innerHTML = shown.slice(0, 500).map(r => `
     <li class="item">
       <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
@@ -170,13 +206,14 @@ function render() {
       <div class="meta muted">
         <span class="tag">${esc(countryOf(r))}</span><span class="tag">${esc(r.tier)}</span>
         ${r.relevance != null ? `<span class="tag${r.relevance >= RELEVANT_MIN ? " hi" : ""}" title="Scored by AI from the headline, 0 to 10">Relevance ${r.relevance} · Significance ${r.significance}</span>` : ""}
+        ${(r.strands || []).map(s => `<span class="tag strand" title="Matched by AI to a strand you follow">${esc(strandName[s] || s)}</span>`).join("")}
         ${esc(r.source_name)} · ${r.published_at ? fmt(r.published_at) : "fetched " + fmt(r.fetched_at)}
       </div>
     </li>`).join("");
 }
 
 function tab(name) {
-  for (const t of ["feed", "events", "health", "scoring"]) {
+  for (const t of ["feed", "events", "stories", "health", "scoring"]) {
     $(t).hidden = t !== name; $("t-" + t).classList.toggle("on", t === name);
   }
 }
@@ -201,29 +238,66 @@ function showScoring(st) {
   Items without a badge are not scored yet.</p>`;
 }
 
-// site/events.json exists only when cluster.py ran in this deployment (scoring switched on).
-// Each event groups headlines about the same story; its title is one of its own headlines.
-let events = [], eventsWindow = 72;
-function renderEvents() {
-  const c = $("e-country").value, q = $("e-q").value.trim().toLowerCase();
-  const shown = events.filter(e => (!c || e.countries.includes(c)) &&
-    (!q || e.members.some(m => m.title.toLowerCase().includes(q))));
-  $("e-count").textContent = `${shown.length} of ${events.length} events from the last ${eventsWindow} hours, ` +
-    "ranked by significance and by how many countries cover them";
-  $("e-items").innerHTML = shown.map(e => `
-    <li class="item">
-      <a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>
+// site/events.json exists only when stories.py ran in this deployment (scoring switched on).
+// Each event groups headlines about the same story; its title is one of its own headlines,
+// shown in English (an automatic translation) with the original underneath. Events in the
+// same storyline fold into one storyline card.
+let events = [], eventsWindow = 72, stories = null;
+const enTitle = e => e.title_en || e.title;
+const original = e => e.title_en && e.title_en !== e.title
+  ? `<div class="orig muted" title="The English title is an automatic translation">Original: ${esc(e.title)}</div>` : "";
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const ccTags = ccs => ccs.map(cc => `<span class="tag">${esc(cc)}</span>`).join("");
+
+function eventCard(e) {
+  return `<li class="item">
+      <a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(enTitle(e))}</a>${original(e)}
       <div class="meta muted">
-        Covered by ${e.outlets} outlets${e.countries.length ? ` in ${e.countries.length} ${e.countries.length === 1 ? "country" : "countries"}` : ""}
-        ${e.countries.map(cc => `<span class="tag">${esc(cc)}</span>`).join("")}
+        Covered by ${e.outlets} outlets${e.countries.length ? ` in ${plural(e.countries.length, "country", "countries")}` : ""}
+        ${ccTags(e.countries)}
         <span class="tag${e.relevance >= RELEVANT_MIN ? " hi" : ""}" title="Best scores among its headlines, 0 to 10">Relevance ${e.relevance} · Significance ${e.significance}</span>
         first seen ${fmt(e.first_seen)}
+        ${e.storyline && e.single ? `· part of <a href="#story-${esc(e.storyline)}" class="follow" data-story="${esc(e.storyline)}">${esc(e.storyline_name || "a storyline")}</a>` : ""}
       </div>
       <details><summary>Show all ${e.articles} headlines</summary><ul class="members">
         ${e.members.map(m => `<li><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>
           <span class="muted">${esc(m.source_name)} · ${esc(countryOf(m))} · ${fmt(m.published_at || m.fetched_at)}</span></li>`).join("")}
       </ul></details>
-    </li>`).join("");
+    </li>`;
+}
+
+function storyCard(es) {
+  const outlets = new Set(es.flatMap(e => e.members.map(m => m.source_name.toLowerCase())));
+  const ccs = [...new Set(es.flatMap(e => e.countries))].sort();
+  const name = es[0].storyline_name || enTitle(es[0]);
+  return `<li class="item story">
+      <div class="kicker">Storyline</div>
+      <a href="#story-${esc(es[0].storyline)}" data-story="${esc(es[0].storyline)}">${esc(name)}</a>
+      <div class="meta muted">${plural(es.length, "event", "events")} in the last ${eventsWindow} hours ·
+        ${outlets.size} outlets${ccs.length ? ` in ${plural(ccs.length, "country", "countries")}` : ""} ${ccTags(ccs)}</div>
+      <ul class="lead">${es.slice(0, 3).map(e => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(enTitle(e))}</a>
+        <span class="muted">${e.outlets} outlets${e.countries.length ? `, ${plural(e.countries.length, "country", "countries")}` : ""}</span></li>`).join("")}</ul>
+      <details><summary>Show all ${plural(es.length, "event", "events")}</summary><ul class="events">${es.map(eventCard).join("")}</ul></details>
+    </li>`;
+}
+
+function renderEvents() {
+  const c = $("e-country").value, q = $("e-q").value.trim().toLowerCase();
+  const shown = events.filter(e => (!c || e.countries.includes(c)) &&
+    (!q || (e.title_en || "").toLowerCase().includes(q) || e.members.some(m => m.title.toLowerCase().includes(q))));
+  const groups = new Map();   // in rank order: a storyline sits where its best event would
+  for (const e of shown) {
+    const k = e.storyline || e.id;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(e);
+  }
+  const cards = [...groups.values()];
+  $("e-count").textContent = `${shown.length} of ${events.length} events from the last ${eventsWindow} hours in ` +
+    `${cards.length} cards, ranked by significance and by how many countries cover them. English titles are automatic translations.`;
+  $("e-items").innerHTML = cards.map(es => {
+    for (const e of es) e.single = es.length === 1;
+    return es.length > 1 ? storyCard(es) : eventCard(es[0]);
+  }).join("");
 }
 function showEvents(ev) {
   $("t-events").textContent = ev ? "Events" : "Events (off)";
@@ -233,7 +307,76 @@ function showEvents(ev) {
   renderEvents();
 }
 
+// site/stories.json, likewise: storylines over the last 30 days, and your strands.
+function spark(days, end, n) {
+  const max = Math.max(1, ...Object.values(days));
+  let bars = "";
+  for (let i = n - 1; i >= 0; i--) {
+    const d = addDays(end, -i), v = days[d] || 0;
+    bars += `<i style="height:${Math.round(100 * v / max)}%" title="${d}: ${v} headlines"></i>`;
+  }
+  return `<div class="spark" aria-label="Headlines per day, last ${n} days">${bars}</div>`;
+}
+const followUrl = s => "https://github.com/DA8889/eurolens-news/issues/new?" + new URLSearchParams({
+  template: "follow-story.yml", title: "Follow: " + (s.name || enTitle(s.events[0])), name: s.name || "",
+  examples: s.events.slice(0, 5).map(e => enTitle(e)).join("\n")});
+
+function renderStories() {
+  if (!stories) return;
+  const q = $("s-q").value.trim().toLowerCase();
+  const hit = s => !q || (s.name || "").toLowerCase().includes(q) ||
+    s.events.some(e => (enTitle(e) + " " + e.title).toLowerCase().includes(q));
+  const list = stories.storylines.filter(hit), end = stories.updated.slice(0, 10);
+  $("s-count").textContent = `${list.length} storylines active in the last ${stories.developing_days} days ` +
+    `(${stories.days}-day history); ${stories.strands.length} strands followed. Updated ${fmt(stories.updated)}.`;
+  $("s-items").innerHTML = list.map(s => {
+    const byDay = new Map();
+    for (const e of s.events) {
+      const d = e.last_seen.slice(0, 10);
+      if (!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(e);
+    }
+    return `<li class="item story" id="story-${esc(s.id)}">
+      <a href="${esc(s.events[0].url)}" target="_blank" rel="noopener">${esc(s.name || enTitle(s.events[0]))}</a>
+      <a class="follow" href="${esc(followUrl(s))}" target="_blank" rel="noopener">+ Follow this story</a>
+      <div class="meta muted">${plural(s.n_events, "event", "events")} · ${s.articles} headlines ·
+        since ${fmt(s.first_seen)} · latest ${fmt(s.last_seen)} ${ccTags(s.countries.slice(0, 12))}${s.countries.length > 12 ? " …" : ""}</div>
+      ${spark(s.days, end, stories.days)}
+      <ul class="lead">${s.events.slice(0, 3).map(e => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(enTitle(e))}</a>
+        <span class="muted">${e.outlets} outlets · ${fmt(e.last_seen)}</span></li>`).join("")}</ul>
+      <details><summary>Show all ${plural(s.events.length, "event", "events")} by day</summary>
+        ${[...byDay].map(([d, es]) => `<div class="day">${d}</div><ul class="lead">${es.map(e =>
+          `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(enTitle(e))}</a>${original(e)}
+           <span class="muted">${e.outlets} outlets${e.countries.length ? `, ${plural(e.countries.length, "country", "countries")}` : ""}</span></li>`).join("")}</ul>`).join("")}
+      </details>
+    </li>`;
+  }).join("");
+  const name = id => (stories.storylines.find(s => s.id === id) || {}).name;
+  $("s-strands").innerHTML = stories.strands.map(st => {
+    const items = st.items.filter(r => !q || (r.title + " " + (r.title_en || "")).toLowerCase().includes(q));
+    const row = r => `<li><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title_en || r.title)}</a>
+      <span class="muted">${esc(r.source_name)} · ${esc(r.country || "EU")} · ${fmt(r.fetched_at)}${r.relevance != null ? ` · relevance ${r.relevance}` : ""}</span></li>`;
+    return `<li class="item">
+      <a>${esc(st.name)}</a>
+      <div class="meta muted">${st.count} headlines in the last ${stories.days} days. ${esc(st.description)}</div>
+      ${st.storylines.length ? `<div class="meta muted">In storylines: ${st.storylines.map(id =>
+        `<a href="#story-${esc(id)}" class="follow" data-story="${esc(id)}">${esc(name(id) || "storyline")}</a>`).join("")}</div>` : ""}
+      <ul class="lead">${items.slice(0, 5).map(row).join("")}</ul>
+      ${items.length > 5 ? `<details><summary>Show ${items.length - 5} more</summary><ul class="lead">${items.slice(5).map(row).join("")}</ul></details>` : ""}
+    </li>`;
+  }).join("");
+}
+function showStories(st) {
+  $("t-stories").textContent = st ? "Stories" : "Stories (off)";
+  if (!st) return;
+  stories = st;
+  strandName = Object.fromEntries(st.strands.map(s => [s.id, s.name]));
+  renderStories();
+  render();
+}
+
 async function load() {
+  tagRule = await fetch(TAGS + "progress.json").then(r => r.ok ? r.json() : null).catch(() => null);
   let [latest_, health] = await Promise.all(["latest.json", "health.json"].map(u => fetch(u).then(r => r.json())));
   $("updated").textContent = `Updated ${fmt(latest_.updated)}`;
   $("f-date").max = latest_.updated.slice(0, 10);
@@ -256,11 +399,23 @@ async function load() {
 
   showScoring(await fetch("scoring.json").then(r => r.ok ? r.json() : null).catch(() => null));
   showEvents(await fetch("events.json").then(r => r.ok ? r.json() : null).catch(() => null));
+  showStories(await fetch("stories.json").then(r => r.ok ? r.json() : null).catch(() => null));
 }
 
 $("t-feed").onclick = () => tab("feed");
 $("t-events").onclick = () => tab("events");
 for (const id of ["e-country", "e-q"]) $(id).addEventListener("input", renderEvents);
+$("t-stories").onclick = () => tab("stories");
+$("s-q").addEventListener("input", renderStories);
+// "part of" and storyline links open the Stories tab at that storyline
+document.addEventListener("click", ev => {
+  const a = ev.target.closest("a[data-story]");
+  if (!a) return;
+  ev.preventDefault();
+  tab("stories");
+  const el = $("story-" + a.dataset.story);
+  if (el) el.scrollIntoView({behavior: "smooth", block: "start"});
+});
 $("t-health").onclick = () => tab("health");
 $("t-scoring").onclick = () => tab("scoring");
 for (const id of ["f-view", "f-country", "f-tier", "f-source", "f-q"]) $(id).addEventListener("input", render);

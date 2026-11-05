@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [sources.yaml, collect.py, site/index.html]
+    paths: [sources.yaml, strands.yaml, collect.py, site/index.html]
 
 permissions:
   contents: write
@@ -47,9 +47,16 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python score.py
 
-      # Events need scores, so they share the SCORING switch. The model (0.22 GB) is cached
-      # once; the window's headline vectors are restored and saved each run so cluster.py
-      # embeds only new headlines.
+      - name: Tag headlines with your strands
+        if: vars.SCORING == 'on'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python tag.py
+
+      # Events and storylines need scores, so they share the SCORING switch. The model
+      # (0.22 GB) is cached once; the window's headline vectors, the event centres and the
+      # previous run's storylines are restored and saved each run, so stories.py embeds
+      # only new headlines.
       - name: Cache the embedding model
         if: vars.SCORING == 'on'
         uses: actions/cache@v4
@@ -65,11 +72,13 @@ jobs:
           key: events-${{ github.run_id }}
           restore-keys: events-
 
-      - name: Group headlines into events
+      - name: Group headlines into events and storylines
         if: vars.SCORING == 'on'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           pip install -q fastembed==0.9.1
-          python cluster.py
+          python stories.py
 
       - name: Save headline vectors
         if: vars.SCORING == 'on'
@@ -84,7 +93,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add archive runs
           if [ -d scores ]; then git add scores; fi
-          if [ -d events ]; then git add events; fi
+          for d in tags events stories; do if [ -d $d ]; then git add $d; fi; done
           if git diff --cached --quiet; then
             echo "No new items"
           else

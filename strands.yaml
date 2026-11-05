@@ -1,0 +1,68 @@
+# Story strands you follow. tag.py asks Haiku which strands each scored headline (relevance 3
+# or above) belongs to; the Stories tab lists them under "Followed", and a tagged headline also
+# shows in "Most relevant". Edit freely, or use "Follow this story" on the Stories tab: any
+# change re-tags the last BACKFILL_DAYS days (tag.py). Example headlines are paraphrases that
+# show the kind of story; they are not taken from the test data.
+strands:
+  - id: spain-housing
+    name: Spain's housing crisis
+    description: >-
+      Housing in Spain: rents, house prices, evictions, tourist flats, housing policy, housing
+      protests, and the political fallout.
+    examples:
+      - Madrid tenants march against record rents
+      - Government caps tourist flats in Barcelona's old town
+
+  - id: flemish-budget-cuts
+    name: Belgian and Flemish budget cuts
+    description: >-
+      Spending cuts and austerity by Belgium's federal government or the Flemish government,
+      and the reactions to them: strikes, protests, and cuts to culture, education, care or
+      public services.
+    examples:
+      - Unions call national strike over federal pension cuts
+      - Flemish theatres warn subsidy cuts will close stages
+
+  - id: serbia-enlargement
+    name: Serbia and EU enlargement
+    description: >-
+      Serbia's politics since the Novi Sad station collapse (protests, government, elections,
+      rule of law), and the path of Serbia and the other Western Balkan countries to EU
+      membership.
+    examples:
+      - Students block Belgrade bridges on the anniversary of the canopy collapse
+      - Brussels opens new negotiating chapter with Montenegro
+
+  - id: cyberattacks
+    name: Cyberattacks in Europe
+    description: >-
+      Cyberattacks, hacks, data breaches and ransomware hitting European countries, companies,
+      institutions or people, and cyber-security policy in Europe. Only attacks on computer
+      systems and data: not physical sabotage, bomb threats, outages with no attack behind
+      them, other crime, or shopping events such as Cyber Monday.
+    examples:
+      - Ransomware attack halts production at a Danish wind-turbine maker
+      - Hackers leak patient records from a Dutch hospital group
+
+  - id: ai-markets
+    name: AI bubble and markets
+    description: >-
+      Fears of an AI bubble, AI company valuations, listings and investment, and stock-market
+      moves driven by AI, worldwide, since they move European markets and pensions. AI must be
+      the subject: general market reports and moves in currencies, gold or shares that are
+      not about AI belong to no strand.
+    examples:
+      - Tech sell-off deepens as investors question AI spending
+      - Chip stocks slide after AI start-up's valuation is cut
+
+  - id: companies
+    name: Companies and industry
+    description: >-
+      News about European companies, or non-European companies' plants, offices and jobs in
+      Europe: results, investments, new plants or closures, job cuts or hiring, takeovers,
+      stock-market listings, insolvencies, and government decisions on them such as permits
+      or zoning for a factory. Not product launches, product reviews, shopping deals or
+      share-price pages, and not deals between non-European companies.
+    examples:
+      - Chemicals group cuts 300 jobs at its Belgian site
+      - Swedish battery maker files for bankruptcy protection

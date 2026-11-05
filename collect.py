@@ -10,7 +10,8 @@ Outputs:
     site/health.json                  per-feed status for this run
     site/feed.xml, site/feeds/CC.xml  Atom feeds: all sources, and one per country
     site/relevant.xml, feeds/CC-relevant.xml
-                                      the same, relevance >= 6 only (once score.py has run)
+                                      the same, relevance >= 6 or in a strand you follow
+                                      (once score.py has run)
     runs/YYYY-MM.jsonl                one line per run: trigger, gap since the last run, failed
                                       feeds, feeds whose items were all new (committed)
 
@@ -37,6 +38,7 @@ ROOT = Path(__file__).parent
 ARCHIVE = ROOT / "archive"
 RUNS = ROOT / "runs"
 SCORES = ROOT / "scores"   # written by score.py, same day-file layout as archive/
+TAGS = ROOT / "tags"       # written by tag.py, likewise
 SITE = ROOT / "site"
 SITE_URL = "https://da8889.github.io/eurolens-news/"
 USER_AGENT = "EuroLensNewsBot/0.1 (+https://github.com/DA8889/eurolens-news)"
@@ -194,6 +196,23 @@ def read_archive(now, days, base=ARCHIVE):
     return out
 
 
+def read_tags(now, days):
+    """{headline id: [strand ids]} from tag.py's files for the last `days` archive days.
+    A line counts if tag.py made it with its current strands version, or if its headline is
+    older than that version's back-fill (tags/progress.json); the latest line for an id wins.
+    Strands no longer in strands.yaml are dropped."""
+    progress = TAGS / "progress.json"
+    if not progress.exists():
+        return {}
+    p = json.loads(progress.read_text(encoding="utf-8"))
+    ids = {s["id"] for s in yaml.safe_load((ROOT / "strands.yaml").read_text(encoding="utf-8"))["strands"]}
+    out = {}
+    for line in read_archive(now, days, TAGS):
+        if line["version"] == p["version"] or line["fetched_at"] < p["since"]:
+            out[line["id"]] = [s for s in line["strands"] if s in ids]
+    return {k: v for k, v in out.items() if v}
+
+
 def log_run(now, fetched_at, healths, new_items):
     """Append this run to runs/YYYY-MM.jsonl. GitHub keeps no record of scheduled runs it
     never starts, so the gap since the previous line is the only trace of them. A feed whose
@@ -253,16 +272,20 @@ def write_atom(path, title, self_url, items, updated):
 def build_site(now):
     """Write latest.json and the Atom feeds from the last LATEST_HOURS of archive, each item
     carrying its scores from scores/ (null when unscored, never 0). The most-relevant feeds
-    are written only once scores exist. score.py calls this again after scoring a run."""
+    are written only once scores exist. score.py and tag.py call this again after their runs.
+    A headline in a strand you follow (tags/) counts as most relevant whatever its score."""
     updated = iso(now)
     cutoff = iso(now - timedelta(hours=LATEST_HOURS))
     scores = {s["id"]: s for s in read_archive(now, 3, SCORES)}
+    tags = read_tags(now, 3)
     latest = sorted((r for r in read_archive(now, 3) if sort_time(r) >= cutoff),
                     key=sort_time, reverse=True)
     for r in latest:
         s = scores.get(r["id"], {})
         r["relevance"], r["significance"] = s.get("relevance"), s.get("significance")
-    relevant = lambda items: [r for r in items if r["relevance"] is not None and r["relevance"] >= RELEVANT_MIN]
+        r["strands"] = tags.get(r["id"], [])
+    relevant = lambda items: [r for r in items if r["strands"] or
+                              (r["relevance"] is not None and r["relevance"] >= RELEVANT_MIN)]
 
     SITE.mkdir(exist_ok=True)
     (SITE / "latest.json").write_text(json.dumps(

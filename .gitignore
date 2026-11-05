@@ -7,6 +7,7 @@ site/relevant.xml
 site/feeds/
 exports/
 logs/
-# cluster.py: embedding model and headline vectors (GitHub keeps them with actions/cache)
+# cluster.py and stories.py: embedding model, headline vectors, event centres, previous
+# storylines (GitHub keeps them with actions/cache)
 .fastembed_cache/
 .events_cache/

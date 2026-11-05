@@ -37,6 +37,8 @@ DAILY_BUDGET = 0.50  # USD per UTC day, summed from scores/costs.jsonl
 SOURCES = ("archive", "gdelt")   # RSS and GDELT records, same shape
 SCORES = ROOT / "scores"
 COSTS = SCORES / "costs.jsonl"
+GLOSS_PROMPT = ('Translate each numbered news headline into short, plain English. '
+                'Return only JSON: {"1": "...", "2": "..."} with one entry per line.')
 
 
 class InsufficientCredits(Exception):
@@ -169,6 +171,41 @@ def score_chunk(records, system, meter, retry=True):
     missing = [r for i, r in enumerate(records, 1) if i not in got]
     if missing and retry:
         out.update(score_chunk(missing, system, meter, retry=False))
+    return out
+
+
+def strip_em_dashes(text):
+    """AI text never ships an em dash: "A — B" becomes "A, B"; en dashes stay.
+    Same rule as or_cost.strip_em_dashes in eurolens/scripts.
+
+    >>> strip_em_dashes("Talks resume — Kyiv waits")
+    'Talks resume, Kyiv waits'
+    >>> strip_em_dashes("Russia–Ukraine war")
+    'Russia–Ukraine war'
+    """
+    return re.sub(r"\s*—\s*", ", ", text) if text else text
+
+
+def gloss(records, meter=None):
+    """{id: English translation} of each record's title (translation only, no other text)."""
+    out = {}
+
+    def one(chunk):
+        user = "\n".join(f"{i} | {' '.join(r['title'].split())}" for i, r in enumerate(chunk, 1))
+        content, _, usage = chat(MODEL, GLOSS_PROMPT, user, max_tokens=60 * len(chunk) + 100)
+        if meter:
+            meter.add(usage)
+        try:
+            data = parse_json(content)
+        except (ValueError, json.JSONDecodeError):
+            return {}
+        return {r["id"]: strip_em_dashes(data[str(i)]) for i, r in enumerate(chunk, 1)
+                if isinstance(data.get(str(i)), str) and data[str(i)].strip()}
+
+    chunks = [records[i:i + CHUNK] for i in range(0, len(records), CHUNK)]
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for got in pool.map(one, chunks):
+            out.update(got)
     return out
 
 

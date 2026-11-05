@@ -31,12 +31,10 @@ from openpyxl import Workbook
 
 from collect import ROOT
 from gdelt_gal import add_sheet
-from score import (CHUNK, MODEL, PROMPT_VERSION, Meter, chat, line_for, load_prompt,
+from score import (CHUNK, MODEL, PROMPT_VERSION, Meter, chat, gloss, line_for, load_prompt,
                    parse_json, read_days, score_chunk)
 
 KEEP = 6                                  # "Most relevant" threshold
-GLOSS_PROMPT = ('Translate each numbered news headline into short, plain English. '
-                'Return only JSON: {"1": "...", "2": "..."} with one entry per line.')
 
 
 def sample(items, n, rng):
@@ -62,26 +60,6 @@ def run_model(records, system):
         for got in pool.map(lambda c: score_chunk(c, system, meter), chunks):
             out.update(got)
     return out, meter
-
-
-def gloss(records):
-    """English translations for human review only."""
-    out = {}
-
-    def one(chunk):
-        user = "\n".join(f"{i} | {' '.join(r['title'].split())}" for i, r in enumerate(chunk, 1))
-        content, _, _ = chat(MODEL, GLOSS_PROMPT, user, max_tokens=60 * len(chunk) + 100)
-        try:
-            data = parse_json(content)
-        except (ValueError, json.JSONDecodeError):
-            return {}
-        return {r["id"]: data.get(str(i)) for i, r in enumerate(chunk, 1)}
-
-    chunks = [records[i:i + CHUNK] for i in range(0, len(records), CHUNK)]
-    with ThreadPoolExecutor(8) as pool:
-        for got in pool.map(one, chunks):
-            out.update(got)
-    return out
 
 
 def read_csv(path):

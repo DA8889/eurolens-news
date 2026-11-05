@@ -2,6 +2,7 @@
 
     python cluster.py              write site/events.json (and the day's snapshot)
     python cluster.py --review     local: compare thresholds, write exports/events_review_<day>.xlsx
+    python cluster.py --at 2026-10-31T00:30    local: rebuild as of that UTC time (back-testing)
 
 Reads headlines first seen in the last WINDOW_HOURS (archive/) with their scores (scores/) and
 keeps those with relevance >= MIN_RELEVANCE; unscored headlines are skipped, never treated as 0.
@@ -14,13 +15,15 @@ event's title is one of its own headlines.
 Outputs:
     site/events.json                 shown events, best first (deployed, not committed)
     events/YYYY/MM/YYYY-MM-DD.json   compact snapshot of the shown events, written by the first
-                                     run of each UTC day (committed; stage E links these)
-In collect.yml this runs only when the repository variable SCORING is "on".
+                                     run of each UTC day (committed; stories.py links these)
+In collect.yml, stories.py runs this step and then its own, only when the repository variable
+SCORING is "on".
 """
 import argparse
 import json
 import math
 import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -43,12 +46,12 @@ NOT_COUNTRIES = (None, "—", "EU")        # pan-European outlets count as outle
 
 def load_window(now):
     """Scored headlines first seen in the window, oldest first, scores attached."""
-    cutoff = iso(now - timedelta(hours=WINDOW_HOURS))
+    cutoff, end = iso(now - timedelta(hours=WINDOW_HOURS)), iso(now)
     scores = {s["id"]: s for s in read_archive(now, 4, SCORES)}
     items = []
     for r in read_archive(now, 4):
         s = scores.get(r["id"])
-        if r["fetched_at"] >= cutoff and s and s["relevance"] >= MIN_RELEVANCE:
+        if cutoff <= r["fetched_at"] <= end and s and s["relevance"] >= MIN_RELEVANCE:
             items.append({**r, "relevance": s["relevance"], "significance": s["significance"]})
     return sorted(items, key=lambda r: (r["fetched_at"], r["id"]))
 
@@ -124,10 +127,12 @@ def build_events(items, vecs, labels):
         relevance = max(r["relevance"] for r in group_items)
         significance = max(r["significance"] for r in group_items)
         events.append({
-            "id": items[idx[0]]["id"], "title": head["title"], "url": head["url"], "lang": head["lang"],
+            "id": items[idx[0]]["id"], "title": head["title"], "title_id": head["id"], "url": head["url"],
+            "lang": head["lang"],
             "first_seen": items[idx[0]]["fetched_at"], "last_seen": items[idx[-1]]["fetched_at"],
             "articles": len(idx), "outlets": len(outlets), "countries": countries,
             "relevance": relevance, "significance": significance,
+            "days": dict(sorted(Counter(r["fetched_at"][:10] for r in group_items).items())),   # headlines per day
             # coverage bonus: 1 country +0, 2 +1, 4 +2, 8 or more +3
             "rank": round(significance + min(3.0, math.log2(len(countries))) if countries else significance, 2),
             "shown": len(outlets) >= 2 and (relevance >= 6 or (len(countries) >= 3 and relevance >= MIN_RELEVANCE)),
@@ -151,8 +156,9 @@ def write(now, events, seconds):
         snap.parent.mkdir(parents=True, exist_ok=True)
         snap.write_text(json.dumps(
             {"created": iso(now), "window_hours": WINDOW_HOURS, "threshold": THRESHOLD, "model": EMBED_MODEL,
-             "events": [{**{k: e[k] for k in ("id", "title", "first_seen", "last_seen", "articles", "outlets",
-                                               "countries", "relevance", "significance", "rank")},
+             "events": [{**{k: e[k] for k in ("id", "title", "title_id", "url", "lang", "first_seen", "last_seen",
+                                               "articles", "outlets", "countries", "relevance", "significance",
+                                               "rank", "days")},
                          "member_ids": [m["id"] for m in e["members"]]} for e in shown]},
             ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"events: {len(events)} groups, {len(shown)} shown, {seconds:.0f}s; top: "
@@ -171,9 +177,8 @@ def review(now, items, vecs, thresholds, budget, pick=None):
     """Compare thresholds with Haiku as a checker (evaluation only) and write the review workbook."""
     from concurrent.futures import ThreadPoolExecutor
     from openpyxl import Workbook
-    from calibrate import gloss
     from gdelt_gal import add_sheet
-    from score import MODEL, Meter, chat, parse_json
+    from score import MODEL, Meter, chat, gloss, parse_json
 
     meter = Meter(budget)
 
@@ -247,13 +252,14 @@ def review(now, items, vecs, thresholds, budget, pick=None):
     add_sheet(wb, "Summary", ["threshold", "headlines", "groups", "groups_2plus", "shown", "largest",
                               "purity_pct", "members_checked", "missed_merge_pct", "near_pairs_checked",
                               "top50_in_3plus_languages", "grouping_seconds"], rows)
-    add_sheet(wb, "Events", ["rank", "event_id", "outlets", "countries", "n_countries", "relevance",
+    english = lambda m: m["title"] if m["lang"] == "en" else en.get(m["id"]) or ""
+    event_en = {e["id"]: english(next(m for m in e["members"] if m["title"] == e["title"])) for e in top}
+    add_sheet(wb, "Events", ["rank", "event_title_en", "outlets", "countries", "n_countries", "relevance",
                              "significance", "is_title", "headline", "title_en", "source", "country", "lang",
-                             "member_relevance", "url", "your_verdict", "your_note"],
-              [[n, e["id"], e["outlets"], " ".join(e["countries"]), len(e["countries"]), e["relevance"],
-                e["significance"], "Y" if m["title"] == e["title"] else "", m["title"],
-                m["title"] if m["lang"] == "en" else en.get(m["id"]) or "", m["source_name"],
-                m["source_country_raw"], m["lang"], m["relevance"], m["url"], "", ""]
+                             "member_relevance", "url", "your_verdict", "your_note", "event_id"],
+              [[n, event_en[e["id"]], e["outlets"], " ".join(e["countries"]), len(e["countries"]), e["relevance"],
+                e["significance"], "Y" if m["title"] == e["title"] else "", m["title"], english(m),
+                m["source_name"], m["source_country_raw"], m["lang"], m["relevance"], m["url"], "", "", e["id"]]
                for n, e in enumerate(top, 1) for m in e["members"]])
     ws = wb.create_sheet("Notes")
     for line in [f"Window: {WINDOW_HOURS} h to {now:%Y-%m-%d %H:%M} UTC; headlines with relevance >= {MIN_RELEVANCE}",
@@ -274,8 +280,9 @@ def main():
     ap.add_argument("--thresholds", type=float, nargs="+", default=[0.80, 0.85, 0.90])
     ap.add_argument("--pick", type=float, help="threshold for the review's Events sheet")
     ap.add_argument("--budget", type=float, default=0.10, help="USD cap for the --review checker")
+    ap.add_argument("--at", help="local testing: run as if it were this UTC time, e.g. 2026-10-31T00:30")
     a = ap.parse_args()
-    now = datetime.now(timezone.utc)
+    now = datetime.fromisoformat(a.at).replace(tzinfo=timezone.utc) if a.at else datetime.now(timezone.utc)
     items = load_window(now)
     if not items:
         print("events: no scored headlines in the window, nothing to group")

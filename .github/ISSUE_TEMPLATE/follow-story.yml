@@ -1,0 +1,24 @@
+name: Follow this story
+description: Add a strand to strands.yaml, so AI matches its headlines from now on (repo owner only)
+title: "Follow story"
+labels: [follow-story]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Strand name
+      description: A short name, shown on the Stories tab.
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What it covers
+      description: The subject in a sentence or two, and anything it should not include. AI reads this to decide which headlines belong.
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example headlines (optional)
+      description: One per line, in any language. They show the kind of story.

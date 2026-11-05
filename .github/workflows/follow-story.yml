@@ -1,0 +1,56 @@
+name: follow-story
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: follow-story
+  cancel-in-progress: false
+
+jobs:
+  follow:
+    # Public repo: only the owner's form submissions may change strands.yaml.
+    if: contains(github.event.issue.labels.*.name, 'follow-story') && github.event.issue.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - id: follow
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}   # passed as data, never spliced into shell
+        run: |
+          set +e
+          python follow_story.py --from-issue > result.txt
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat result.txt
+
+      - if: steps.follow.outputs.code == '0'
+        run: |
+          git config user.name "eurolens-news-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add strands.yaml
+          git commit -q -m "Follow story (#$ISSUE)"
+          git pull --rebase -q origin main
+          git push -q origin HEAD:main
+          printf '\n\nThe next collect run tags the last 3 days with it (when scoring is on); it then shows under Followed on the Stories tab.\n' >> result.txt
+          gh issue close "$ISSUE" --comment "$(cat result.txt)"
+
+      - if: steps.follow.outputs.code != '0'
+        run: gh issue comment "$ISSUE" --body-file result.txt
