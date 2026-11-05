@@ -12,6 +12,7 @@ Outputs:
     site/relevant.xml, feeds/CC-relevant.xml
                                       the same, relevance >= 6 or in a strand you follow
                                       (once score.py has run)
+    site/relevant.json                those items, trimmed, for the EuroLens app (likewise)
     runs/YYYY-MM.jsonl                one line per run: trigger, gap since the last run, failed
                                       feeds, feeds whose items were all new (committed)
 
@@ -47,6 +48,8 @@ SEEN_DAYS = 7          # cross-run dedup window
 LATEST_HOURS = 48      # window for the web page and Atom feeds
 ATOM_ALL_MAX = 500     # cap for the all-sources feed
 RELEVANT_MIN = 6       # relevance >= this is "Most relevant" (same threshold as calibration)
+APP_FIELDS = ("id", "title", "url", "source_name", "source_country_raw", "lang", "published_at",
+              "fetched_at", "relevance", "strands")   # site/relevant.json, for the EuroLens app's News tab
 TIMEOUT = 20
 
 ATOM = "http://www.w3.org/2005/Atom"
@@ -295,6 +298,10 @@ def build_site(now):
     if scores:
         write_atom(SITE / "relevant.xml", "EuroLens news: most relevant", SITE_URL + "relevant.xml",
                    relevant(latest)[:ATOM_ALL_MAX], updated)
+        # latest.json is ~15 MB with scoring on, too big for the app's page load.
+        (SITE / "relevant.json").write_text(json.dumps(
+            {"updated": updated, "items": [{k: r[k] for k in APP_FIELDS} for r in relevant(latest)]},
+            ensure_ascii=False), encoding="utf-8")
     by_country = {}
     for r in latest:
         cc = r["source_country_raw"]
