@@ -15,14 +15,16 @@ run's storyline it shares most events with; a new one takes its first event's id
 
 AI only phrases (Haiku): event titles and strand headlines are translated to English once
 (events/en/YYYY-MM.jsonl), and each storyline of 2+ events is named from its events' English
-titles (prompts/story_name_v1.txt), renamed only once it has doubled in size. Costs go to
-scores/costs.jsonl, under score.py's daily budget.
+titles (prompts/story_name_v1.txt), renamed only once it has doubled in size. Storylines
+with enough headlines get a short summary from summarize.py. Costs go to scores/costs.jsonl,
+under score.py's daily budget.
 
 Outputs:
     site/events.json                 cluster.py's file; each event also gets "title_en" and,
                                      when its storyline has 2+ events, "storyline"
-    site/stories.json                storylines of 2+ events seen in the last 7 days, and the
-                                     strands you follow with their tagged headlines (deployed)
+    site/stories.json                storylines of 2+ events seen in the last 7 days, each with
+                                     its summary or null, and the strands you follow with their
+                                     tagged headlines (deployed)
     stories/YYYY/MM/YYYY-MM-DD.json  daily snapshot: storyline ids, names, event ids (committed)
     .events_cache/centres.npz, .events_cache/stories.json
                                      snapshot events' centres and the previous run's storylines
@@ -40,6 +42,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 import cluster
+import summarize
 from collect import ARCHIVE, ROOT, SCORES, SITE, iso, read_archive, read_tags
 from score import (COSTS, DAILY_BUDGET, MODEL, Meter, chat, gloss, parse_json, spent_today,
                    strip_em_dashes)
@@ -387,7 +390,7 @@ def strands_view(now, stories, english, meter, save):
     return out
 
 
-def public(s, english):
+def public(s, english, summary):
     return {"id": s["id"], "name": s.get("name"), "first_seen": s["first_seen"], "last_seen": s["last_seen"],
             "n_events": s["n_events"], "articles": s["articles"], "countries": s["countries"], "rank": s["rank"],
             "days": s["days"],
@@ -395,7 +398,8 @@ def public(s, english):
                         "lang": e["lang"], "first_seen": e["first_seen"], "last_seen": e["last_seen"],
                         "articles": e["articles"], "outlets": e["outlets"], "countries": e["countries"],
                         "significance": e["significance"], "rank": e["rank"], "current": e["current"]}
-                       for e in s["events"][:EVENTS_PER_STORY]]}
+                       for e in s["events"][:EVENTS_PER_STORY]],
+            "summary": summary}
 
 
 def run(now, threshold=THRESHOLD, save=True):
@@ -445,9 +449,10 @@ def write(now, stories, events, english, meter):
             e["storyline"], e["storyline_name"] = s["id"], s.get("name")
     path.write_text(json.dumps(site_events, ensure_ascii=False), encoding="utf-8")
     strands = strands_view(now, stories, english, meter, True)
+    summaries = summarize.update(now, developing)
     (SITE / "stories.json").write_text(json.dumps(
         {"updated": iso(now), "days": DAYS, "threshold": THRESHOLD, "developing_days": DEVELOPING_DAYS,
-         "storylines": [public(s, english) for s in developing], "strands": strands},
+         "storylines": [public(s, english, summaries[s["id"]]) for s in developing], "strands": strands},
         ensure_ascii=False), encoding="utf-8")
     state = [{"id": s["id"], "name": s.get("name"), "named_size": s.get("named_size"),
               "first_seen": s["first_seen"], "last_seen": s["last_seen"], "n_events": s["n_events"],

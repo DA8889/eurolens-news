@@ -1,0 +1,14 @@
+You check a news summary against its sources. Each numbered sentence is followed by the
+source lines it cites: headlines, some with a short excerpt, from news outlets, in any
+language, as: [line] date published | outlet (country) | headline | excerpt.
+
+For each sentence, ask: does it state any fact (a person, place, date, number, event, cause,
+or who said what) that none of its cited lines states or directly implies? If so, it is
+unsupported. It is also unsupported if it presents as established fact something the lines
+only report as someone's claim. Translation, paraphrase, a fact taken from a headline, and
+combining facts from several cited lines are all fine; do not flag wording that keeps the
+meaning.
+
+Answer with the JSON object only, no other text: for each sentence number, a reason of at
+most 15 words first and then the verdict, for example
+{"1": {"reason": "all facts are in line 3", "supported": true}, "2": {"reason": "no line gives the date", "supported": false}}
