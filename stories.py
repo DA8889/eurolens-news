@@ -404,9 +404,24 @@ def public(s, english, summary):
             "summary": summary}
 
 
+def tally(ids, records):
+    """(headlines, outlets, countries) of the headlines `ids` found in `records`, counted as the
+    app counts a storyline's Coverage: an outlet's Google News route is the same outlet.
+
+    >>> recs = {"a": {"source_name": "Le Soir", "source_country_raw": "BE"},
+    ...         "b": {"source_name": "Le Soir (via Google News)", "source_country_raw": "BE"},
+    ...         "c": {"source_name": "Politico Europe", "source_country_raw": "EU"}}
+    >>> tally(["a", "b", "c", "gone"], recs)
+    (3, 2, ['BE'])
+    """
+    rs = [records[i] for i in ids if i in records]
+    outlets = {re.sub(r" \(via google news\)$", "", r["source_name"].lower()) for r in rs}
+    return len(rs), len(outlets), sorted({r["source_country_raw"] for r in rs} - set(cluster.NOT_COUNTRIES))
+
+
 def detail(s, records, english):
-    """A storyline's events as in public(), each with its headlines per day and its headlines
-    newest first, for site/story/<id>.json. English titles only where one is already stored.
+    """All of a storyline's events, each with its headlines per day and its headlines newest
+    first, for site/story/<id>.json. English titles only where one is already stored.
 
     >>> r = {"id": "h1", "title": "Budget beschlossen", "url": "https://orf.at/1", "source_name": "ORF",
     ...      "source_country_raw": "AT", "lang": "de", "published_at": "2026-11-04T10:00:00Z"}
@@ -416,7 +431,7 @@ def detail(s, records, english):
     (1, 'Budget passed', 'AT')
     """
     events = []
-    for e in s["events"][:EVENTS_PER_STORY]:
+    for e in s["events"]:
         rs = sorted((records[m] for m in e["member_ids"] if m in records),
                     key=lambda r: r.get("published_at") or r["fetched_at"], reverse=True)
         events.append({"id": e["id"], "days": e["days"],
@@ -477,12 +492,22 @@ def write(now, stories, events, english, meter):
     path.write_text(json.dumps(site_events, ensure_ascii=False), encoding="utf-8")
     strands = strands_view(now, stories, english, meter, True)
     summaries = summarize.update(now, developing)
+    # Counts from the headlines themselves, so a storyline's line, its header and its Coverage
+    # agree: an event seen on several days keeps all its headlines, not its newest record's count.
+    records = {r["id"]: r for r in read_archive(now, DAYS + 1, ARCHIVE)}
+    for s in developing:
+        for e in s["events"]:
+            n, outlets, countries = tally(e["member_ids"], records)
+            if n:
+                e["articles"], e["outlets"], e["countries"] = n, outlets, countries
+        n, _, countries = tally({m for e in s["events"] for m in e["member_ids"]}, records)
+        if n:
+            s["articles"], s["countries"] = n, countries
     (SITE / "stories.json").write_text(json.dumps(
         {"updated": iso(now), "days": DAYS, "threshold": THRESHOLD, "developing_days": DEVELOPING_DAYS,
          "storylines": [public(s, english, summaries[s["id"]]) for s in developing], "strands": strands},
         ensure_ascii=False), encoding="utf-8")
     # one file per storyline, fetched only when someone opens it; drop storylines no longer shown
-    records = {r["id"]: r for r in read_archive(now, DAYS + 1, ARCHIVE)}
     folder = SITE / "story"
     folder.mkdir(exist_ok=True)
     keep = set()
