@@ -11,3 +11,4 @@ logs/
 # storylines (GitHub keeps them with actions/cache)
 .fastembed_cache/
 .events_cache/
+site/story/

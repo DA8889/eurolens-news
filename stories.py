@@ -25,6 +25,8 @@ Outputs:
     site/stories.json                storylines of 2+ events seen in the last 7 days, each with
                                      its summary or null, and the strands you follow with their
                                      tagged headlines (deployed)
+    site/story/<id>.json             each of those storylines' events with their headlines per
+                                     day and their headlines (deployed)
     stories/YYYY/MM/YYYY-MM-DD.json  daily snapshot: storyline ids, names, event ids (committed)
     .events_cache/centres.npz, .events_cache/stories.json
                                      snapshot events' centres and the previous run's storylines
@@ -402,6 +404,31 @@ def public(s, english, summary):
             "summary": summary}
 
 
+def detail(s, records, english):
+    """A storyline's events as in public(), each with its headlines per day and its headlines
+    newest first, for site/story/<id>.json. English titles only where one is already stored.
+
+    >>> r = {"id": "h1", "title": "Budget beschlossen", "url": "https://orf.at/1", "source_name": "ORF",
+    ...      "source_country_raw": "AT", "lang": "de", "published_at": "2026-11-04T10:00:00Z"}
+    >>> s = {"id": "s1", "events": [{"id": "e1", "days": {"2026-11-04": 1}, "member_ids": ["h1", "gone"]}]}
+    >>> m = detail(s, {"h1": r}, {"h1": "Budget passed"})["events"][0]["members"]
+    >>> len(m), m[0]["title_en"], m[0]["country"]
+    (1, 'Budget passed', 'AT')
+    """
+    events = []
+    for e in s["events"][:EVENTS_PER_STORY]:
+        rs = sorted((records[m] for m in e["member_ids"] if m in records),
+                    key=lambda r: r.get("published_at") or r["fetched_at"], reverse=True)
+        events.append({"id": e["id"], "days": e["days"],
+                       "members": [{"id": r["id"], "title": r["title"], "url": r["url"],
+                                    "source_name": r["source_name"], "country": r["source_country_raw"],
+                                    "lang": r.get("lang"), "published_at": r.get("published_at") or r["fetched_at"],
+                                    **({"title_en": english[r["id"]]}
+                                       if r.get("lang") != "en" and r["id"] in english else {})}
+                                   for r in rs]})
+    return {"id": s["id"], "events": events}
+
+
 def run(now, threshold=THRESHOLD, save=True):
     """Events, then storylines; with `save`, also English titles and names (Haiku).
     Returns (storylines, merged events, this run's events, English titles, meter)."""
@@ -454,6 +481,19 @@ def write(now, stories, events, english, meter):
         {"updated": iso(now), "days": DAYS, "threshold": THRESHOLD, "developing_days": DEVELOPING_DAYS,
          "storylines": [public(s, english, summaries[s["id"]]) for s in developing], "strands": strands},
         ensure_ascii=False), encoding="utf-8")
+    # one file per storyline, fetched only when someone opens it; drop storylines no longer shown
+    records = {r["id"]: r for r in read_archive(now, DAYS + 1, ARCHIVE)}
+    folder = SITE / "story"
+    folder.mkdir(exist_ok=True)
+    keep = set()
+    for s in developing:
+        path = folder / f"{s['id']}.json"
+        path.write_text(json.dumps({**detail(s, records, english), "updated": iso(now)},
+                                   ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        keep.add(path.name)
+    for path in folder.glob("*.json"):
+        if path.name not in keep:
+            path.unlink()
     state = [{"id": s["id"], "name": s.get("name"), "named_size": s.get("named_size"),
               "first_seen": s["first_seen"], "last_seen": s["last_seen"], "n_events": s["n_events"],
               "event_ids": sorted(s["event_ids"])} for s in multi]
