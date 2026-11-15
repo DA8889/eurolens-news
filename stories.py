@@ -19,12 +19,19 @@ titles (prompts/story_name_v1.txt), renamed only once it has doubled in size. St
 with enough headlines get a short summary from summarize.py. Costs go to scores/costs.jsonl,
 under score.py's daily budget.
 
+Sections: each shown event is put once in one of eight site sections (SECTION_IDS) by Haiku,
+from its English title and two more of its headlines (prompts/sections_v1.txt), and kept in
+stories/sections/YYYY-MM.jsonl {"id", "section", "version"}. An event left unanswered stays
+without one and is asked again next run, never guessed. A storyline's section is computed, not
+asked: the section most of its headlines fall in (story_section).
+
 Outputs:
-    site/events.json                 cluster.py's file; each event also gets "title_en" and,
-                                     when its storyline has 2+ events, "storyline"
+    site/events.json                 cluster.py's file; each event also gets "title_en", its
+                                     "section" once known and, when its storyline has 2+ events,
+                                     "storyline"
     site/stories.json                storylines of 2+ events seen in the last 7 days, each with
-                                     its summary or null, and the strands you follow with their
-                                     tagged headlines (deployed)
+                                     its summary or null and its section (as are its events), and
+                                     the strands you follow with their tagged headlines (deployed)
     site/story/<id>.json             each of those storylines' events with their headlines per
                                      day and their headlines (deployed)
     stories/YYYY/MM/YYYY-MM-DD.json  daily snapshot: storyline ids, names, event ids (committed)
@@ -34,6 +41,7 @@ Outputs:
 In collect.yml this runs only when the repository variable SCORING is "on".
 """
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -56,12 +64,16 @@ SHOW_MAX = 100
 EVENTS_PER_STORY = 60
 STRAND_MAX = 100       # headlines per strand on the Stories tab
 NAME_PROMPT = "story_name_v1"
+SECTION_PROMPT = "sections_v1"
+SECTION_IDS = ("politics", "economy", "security", "energy", "migration", "tech", "society", "culture")
+SECTION_CHUNK = 40
 RUN_BUDGET = 0.05
 CACHE = ROOT / ".events_cache"
 CENTRES = CACHE / "centres.npz"
 STATE = CACHE / "stories.json"
 STORIES = ROOT / "stories"
 ENGLISH = cluster.EVENTS / "en"
+SECTIONS = STORIES / "sections"
 
 
 def unit(v):
@@ -321,6 +333,80 @@ def english_title(e, english):
     return e["title"] if e.get("lang") == "en" else english.get(e.get("title_id"))
 
 
+def read_sections(now):
+    """{event id: section} stored this month and last; the latest line for an id wins."""
+    out = {}
+    for d in (now.replace(day=1) - timedelta(days=1), now):
+        path = SECTIONS / f"{d:%Y-%m}.jsonl"
+        if path.exists():
+            with path.open(encoding="utf-8") as f:
+                out.update((l["id"], l["section"]) for l in map(json.loads, f) if l.get("section") in SECTION_IDS)
+    return out
+
+
+def section_of(e, sections):
+    """An event's stored section, by its id or any id it had in earlier snapshots."""
+    return sections.get(e["id"]) or next((sections[x] for x in e.get("record_ids", ()) if x in sections), None)
+
+
+def assign_sections(now, events, sections, english, meter, save=True):
+    """Haiku puts each event without a section into one of SECTION_IDS, from its English title and
+    up to two more of its headlines; answers are stored once. Returns the updated {id: section}."""
+    system = (ROOT / "prompts" / f"{SECTION_PROMPT}.txt").read_text(encoding="utf-8")
+    version = hashlib.sha1(system.encode("utf-8")).hexdigest()[:12]
+    todo, seen = [], set()
+    for e in events:
+        if e["id"] not in seen and not section_of(e, sections):
+            seen.add(e["id"])
+            todo.append(e)
+    got = {}
+    for i in range(0, len(todo), SECTION_CHUNK):
+        if meter.exhausted():
+            break
+        chunk = todo[i:i + SECTION_CHUNK]
+        lines = []
+        for n, e in enumerate(chunk, 1):
+            title = e.get("title_en") or english_title(e, english) or e["title"]
+            others = [m.get("title_en") or english.get(m["id"]) or m["title"] for m in e.get("members", ())
+                      if m.get("id") != e.get("title_id") and m.get("title") != e["title"]][:2]
+            lines.append(f"{n} | " + " || ".join(" ".join(t.split()) for t in [title, *others]))
+        content, _, usage = chat(MODEL, system, "\n".join(lines), 10 * len(chunk) + 50)
+        meter.add(usage)
+        try:
+            data = parse_json(content)
+        except (ValueError, json.JSONDecodeError):
+            continue
+        got.update((e["id"], data[str(n)]) for n, e in enumerate(chunk, 1) if data.get(str(n)) in SECTION_IDS)
+    if save and got:
+        SECTIONS.mkdir(parents=True, exist_ok=True)
+        with (SECTIONS / f"{now:%Y-%m}.jsonl").open("a", encoding="utf-8") as f:
+            f.writelines(json.dumps({"id": i, "section": x, "version": version}) + "\n" for i, x in got.items())
+    return {**sections, **got}
+
+
+def story_section(events, sections):
+    """The section most of a storyline's headlines fall in: each event's section weighted by its
+    headlines; a tie goes to the section of the highest-ranked event among the tied. None if no
+    event has a section.
+
+    >>> evs = [{"id": "a", "articles": 6, "rank": 3.0}, {"id": "b", "articles": 3, "rank": 4.0},
+    ...        {"id": "c", "articles": 2, "rank": 1.0}, {"id": "d", "articles": 9, "rank": 2.0}]
+    >>> story_section(evs, {"a": "security", "b": "economy", "c": "economy"})
+    'security'
+    >>> story_section(evs[1:], {"a": "security", "b": "economy", "c": "security"})
+    'economy'
+    >>> story_section(evs[3:], {}) is None
+    True
+    """
+    weight, best = {}, {}
+    for e in events:
+        x = section_of(e, sections)
+        if x:
+            weight[x] = weight.get(x, 0) + e["articles"]
+            best[x] = max(best.get(x, -math.inf), e["rank"])
+    return max(weight, key=lambda x: (weight[x], best[x])) if weight else None
+
+
 def name_stories(stories, english, meter):
     """Haiku names storylines of 2+ events that have no name yet, or have doubled since."""
     system = (ROOT / "prompts" / f"{NAME_PROMPT}.txt").read_text(encoding="utf-8")
@@ -392,14 +478,15 @@ def strands_view(now, stories, english, meter, save):
     return out
 
 
-def public(s, english, summary):
+def public(s, english, summary, sections):
     return {"id": s["id"], "name": s.get("name"), "first_seen": s["first_seen"], "last_seen": s["last_seen"],
             "n_events": s["n_events"], "articles": s["articles"], "countries": s["countries"], "rank": s["rank"],
-            "days": s["days"],
+            "days": s["days"], "section": story_section(s["events"], sections),
             "events": [{"id": e["id"], "title": e["title"], "title_en": english_title(e, english), "url": e["url"],
                         "lang": e["lang"], "first_seen": e["first_seen"], "last_seen": e["last_seen"],
                         "articles": e["articles"], "outlets": e["outlets"], "countries": e["countries"],
-                        "significance": e["significance"], "rank": e["rank"], "current": e["current"]}
+                        "significance": e["significance"], "rank": e["rank"], "current": e["current"],
+                        "section": section_of(e, sections)}
                        for e in s["events"][:EVENTS_PER_STORY]],
             "summary": summary}
 
@@ -482,11 +569,15 @@ def write(now, stories, events, english, meter):
     recent = iso(now - timedelta(days=DEVELOPING_DAYS))
     developing = [s for s in multi if s["last_seen"] >= recent][:SHOW_MAX]
     story_of = {x: s for s in multi for e in s["events"] for x in e["record_ids"]}
+    shown = [e for e in events if e["shown"]][:cluster.SHOW_MAX]
+    sections = assign_sections(now, shown + [e for s in developing for e in s["events"][:EVENTS_PER_STORY]],
+                               read_sections(now), english, meter)
     path = SITE / "events.json"
     site_events = json.loads(path.read_text(encoding="utf-8"))
     for e in site_events["events"]:
         s = story_of.get(e["id"])
         e["title_en"] = english_title(e, english)
+        e["section"] = sections.get(e["id"])
         if s:
             e["storyline"], e["storyline_name"] = s["id"], s.get("name")
     path.write_text(json.dumps(site_events, ensure_ascii=False), encoding="utf-8")
@@ -505,7 +596,7 @@ def write(now, stories, events, english, meter):
             s["articles"], s["countries"] = n, countries
     (SITE / "stories.json").write_text(json.dumps(
         {"updated": iso(now), "days": DAYS, "threshold": THRESHOLD, "developing_days": DEVELOPING_DAYS,
-         "storylines": [public(s, english, summaries[s["id"]]) for s in developing], "strands": strands},
+         "storylines": [public(s, english, summaries[s["id"]], sections) for s in developing], "strands": strands},
         ensure_ascii=False), encoding="utf-8")
     # one file per storyline, fetched only when someone opens it; drop storylines no longer shown
     folder = SITE / "story"
