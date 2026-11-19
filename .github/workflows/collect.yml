@@ -53,6 +53,12 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python tag.py
 
+      - name: Tag headlines with the country pairs they are about
+        if: vars.SCORING == 'on'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python pairs.py
+
       # Events and storylines need scores, so they share the SCORING switch. The model
       # (0.22 GB) is cached once; the window's headline vectors, the event centres and the
       # previous run's storylines are restored and saved each run, so stories.py embeds
@@ -93,7 +99,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add archive runs
           if [ -d scores ]; then git add scores; fi
-          for d in tags events stories; do if [ -d $d ]; then git add $d; fi; done
+          for d in tags pairtags events stories; do if [ -d $d ]; then git add $d; fi; done
           if git diff --cached --quiet; then
             echo "No new items"
           else

@@ -35,6 +35,8 @@ Outputs:
     site/story/<id>.json             each of those storylines' events with their headlines per
                                      day and their headlines (deployed)
     stories/YYYY/MM/YYYY-MM-DD.json  daily snapshot: storyline ids, names, event ids (committed)
+    site/pairs/                      pair news for the Relations pages, from pairs.py's tags
+                                     (pair_news.py; deployed)
     .events_cache/centres.npz, .events_cache/stories.json
                                      snapshot events' centres and the previous run's storylines
                                      (kept by actions/cache; rebuilt from the snapshots if lost)
@@ -52,6 +54,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 import cluster
+import pair_news
 import summarize
 from collect import ARCHIVE, ROOT, SCORES, SITE, iso, read_archive, read_tags
 from score import (COSTS, DAILY_BUDGET, MODEL, Meter, chat, gloss, parse_json, spent_today,
@@ -610,6 +613,7 @@ def write(now, stories, events, english, meter):
     for path in folder.glob("*.json"):
         if path.name not in keep:
             path.unlink()
+    pair_news.update(now, events, developing, english, meter, translate)
     state = [{"id": s["id"], "name": s.get("name"), "named_size": s.get("named_size"),
               "first_seen": s["first_seen"], "last_seen": s["last_seen"], "n_events": s["n_events"],
               "event_ids": sorted(s["event_ids"])} for s in multi]

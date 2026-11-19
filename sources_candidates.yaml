@@ -1,0 +1,70 @@
+# Candidate feeds for pair news (eurolens/PAIR_NEWS_SOURCES.md sections 3.3-3.4), checked live
+# by verify_sources.py (locally and from GitHub Actions: verify-sources.yml) before any goes into
+# sources.yaml with add_source.py. Fields as in sources.yaml, except `urls`: tried in order, each
+# a feed or a page advertising one. Nothing here is fetched by collect.py.
+#
+# Left out after checks on 2026-11-19 (from home):
+#   - GOV.UK world-location feeds (news-and-communications.atom?world_locations[]=france): they
+#     work, but are low volume (Czechia: 20 items in 3 years) and full of multilateral joint
+#     statements filed under many countries (the same E4 statement under Czechia and Malta), so
+#     their country is no evidence of a pair. Their items are already in gb_gov (all GOV.UK news).
+#   - France Diplomatie per-country feeds: the site was restructured (/fr/information-par-pays/)
+#     and advertises no feed; the brief's /en/backend-fd.php3 is 404. Only the newsroom pages
+#     stay below, to record the result.
+#   - The Local bilateral tag feeds (feeds.thelocal.com/rss/fr/france-and-the-uk and others):
+#     valid RSS with no items, and no "X and Y" tags on any edition's /topics page.
+#   - Google News site: routes for ministries without feeds: deferred while Google News answers
+#     the Actions runner with HTTP 429 (owner decision, 2026-11-19).
+
+candidates:
+
+  # ===================== FOREIGN MINISTRIES (one feed, many partners) =====================
+  - {id: de_aa_press_en, tier: government, country: DE, name: "Federal Foreign Office: press releases and speeches (EN)", lang: en, license: psi_attribution, urls: ["https://www.auswaertiges-amt.de/static/includes/rss_en/RSS_Pressemitteilungen_Reden.xml"]}
+  - {id: de_aa_articles_en, tier: government, country: DE, name: "Federal Foreign Office: current articles (EN)", lang: en, license: psi_attribution, urls: ["https://www.auswaertiges-amt.de/static/includes/rss_en/RSS_Aktuelle_Artikel.xml"]}
+  - {id: nl_bz_news_en, tier: government, country: NL, name: "Netherlands Ministry of Foreign Affairs: news (EN)", lang: en, license: open_cc, urls: ["https://feeds.government.nl/ministries/ministry-of-foreign-affairs/news.rss"]}
+  - {id: nl_bz_news_nl, tier: government, country: NL, name: "Ministerie van Buitenlandse Zaken: nieuws", lang: nl, license: open_cc, urls: ["https://feeds.rijksoverheid.nl/ministeries/ministerie-van-buitenlandse-zaken/nieuws.rss"]}
+  - {id: fr_meae_news, tier: government, country: FR, name: "France Diplomatie: news", lang: en, license: psi_attribution, urls: ["https://www.diplomatie.gouv.fr/en/press/news", "https://www.diplomatie.gouv.fr/fr/presse/decouvrir-et-s-informer/actualites"]}
+  - {id: ee_riigikogu_fac, tier: parliament, country: EE, name: "Riigikogu: Foreign Affairs Committee", lang: en, license: psi_attribution, urls: ["https://www.riigikogu.ee/en/uudise-yksus/foreign-affairs-committee/feed/"]}
+  - {id: ee_vm_news, tier: government, country: EE, name: "Estonian Ministry of Foreign Affairs: news", lang: en, license: psi_attribution, urls: ["https://vm.ee/en/rss.xml", "https://vm.ee/en/news"]}
+  - {id: fi_um_press, tier: government, country: FI, name: "Ministry for Foreign Affairs of Finland: press releases", lang: en, license: psi_attribution, urls: ["https://um.fi/press-releases"]}
+  - {id: cz_mzv_press, tier: government, country: CZ, name: "Ministerstvo zahraničních věcí: tiskové zprávy", lang: cs, license: psi_attribution, urls: ["https://mzv.gov.cz/jnp/cz/udalosti_a_media/tiskove_zpravy/index.html"]}
+  - {id: se_ud_news, tier: government, country: SE, name: "Utrikesdepartementet", lang: sv, license: psi_attribution, urls: ["https://www.regeringen.se/utrikesdepartementet"]}
+  - {id: it_esteri_comunicati, tier: government, country: IT, name: "Farnesina: comunicati", lang: it, license: psi_attribution, urls: ["https://www.esteri.it/it/sala_stampa/archivionotizie/comunicati/feed/", "https://www.esteri.it/it/sala_stampa/archivionotizie/comunicati/"]}
+  - {id: pl_msz_news, tier: government, country: PL, name: "Ministerstwo Spraw Zagranicznych: aktualności", lang: pl, license: psi_attribution, urls: ["https://www.gov.pl/web/dyplomacja/aktualnosci"]}
+
+  # ===================== CROSS-BORDER OUTLETS =====================
+  - {id: pan_politico_foreign_affairs, tier: broadcaster, country: "—", name: "Politico Europe: Foreign Affairs", lang: en, license: broadcaster_snippet, urls: ["https://www.politico.eu/section/foreign-affairs/feed/"]}
+  - {id: pan_eurotopics_en, tier: aggregator, country: "—", name: "euro|topics press review (EN)", lang: en, license: psi_attribution, urls: ["https://www.eurotopics.net/export/en/rss.xml", "http://www.eurotopics.net/export/en/rss.xml"]}
+  - {id: pan_eurotopics_de, tier: aggregator, country: "—", name: "euro|topics Presseschau (DE)", lang: de, license: psi_attribution, urls: ["https://www.eurotopics.net/export/de/rss.xml", "http://www.eurotopics.net/export/de/rss.xml"]}
+  - {id: bg_bta_balkans, tier: agency, country: BG, name: "BTA: Balkans (EN)", lang: en, license: agency_free_attribution, urls: ["https://www.bta.bg/en/news/balkans/rss"]}
+  - {id: pl_notes_from_poland, tier: broadcaster, country: PL, name: "Notes from Poland", lang: en, license: broadcaster_snippet, urls: ["https://notesfrompoland.com/feed/"]}
+  - {id: pan_balkan_insight, tier: broadcaster, country: "—", name: "Balkan Insight (BIRN)", lang: en, license: broadcaster_snippet, urls: ["https://balkaninsight.com/feed/", "https://birn.eu.com/feed/"]}
+  - {id: de_berlin_policy_journal, tier: broadcaster, country: DE, name: "Berlin Policy Journal", lang: en, license: broadcaster_snippet, urls: ["https://berlinpolicyjournal.com/feed/"]}
+  - {id: pan_kafkadesk, tier: broadcaster, country: "—", name: "Kafkadesk", lang: en, license: broadcaster_snippet, urls: ["https://kafkadesk.org/feed/"]}
+
+  # ===================== ENGLISH-LANGUAGE NATIONAL OUTLETS (brief: candidates) =====================
+  - {id: be_brussels_times, tier: broadcaster, country: BE, name: "The Brussels Times", lang: en, license: broadcaster_snippet, urls: ["https://www.brusselstimes.com/feed", "https://www.brusselstimes.com/"]}
+  - {id: el_ekathimerini, tier: broadcaster, country: EL, name: "Kathimerini English Edition", lang: en, license: broadcaster_snippet, urls: ["https://www.ekathimerini.com/rss", "https://www.ekathimerini.com/"]}
+  - {id: cy_cyprus_mail, tier: broadcaster, country: CY, name: "Cyprus Mail", lang: en, license: broadcaster_snippet, urls: ["https://cyprus-mail.com/feed/"]}
+  - {id: mt_times_of_malta, tier: broadcaster, country: MT, name: "Times of Malta", lang: en, license: broadcaster_snippet, urls: ["https://timesofmalta.com/rss", "https://timesofmalta.com/"]}
+  - {id: ie_irish_times, tier: broadcaster, country: IE, name: "The Irish Times", lang: en, license: broadcaster_snippet, urls: ["https://www.irishtimes.com/arc/outboundfeeds/feed-irish-news/?outputType=xml", "https://www.irishtimes.com/"]}
+  - {id: lu_luxembourg_times, tier: broadcaster, country: LU, name: "Luxembourg Times", lang: en, license: broadcaster_snippet, urls: ["https://www.luxtimes.lu/"]}
+  - {id: sk_slovak_spectator, tier: broadcaster, country: SK, name: "The Slovak Spectator", lang: en, license: broadcaster_snippet, urls: ["https://spectator.sme.sk/rss", "https://spectator.sme.sk/"]}
+  - {id: cz_radio_prague_int, tier: broadcaster, country: CZ, name: "Radio Prague International", lang: en, license: broadcaster_snippet, urls: ["https://english.radio.cz/"]}
+  - {id: fi_yle_news, tier: broadcaster, country: FI, name: "Yle News", lang: en, license: broadcaster_snippet, urls: ["https://yle.fi/rss/uutiset.rss?osasto=news"]}
+  - {id: nl_dutchnews, tier: broadcaster, country: NL, name: "DutchNews.nl", lang: en, license: broadcaster_snippet, urls: ["https://www.dutchnews.nl/feed/"]}
+  - {id: ro_romania_insider, tier: broadcaster, country: RO, name: "Romania Insider", lang: en, license: broadcaster_snippet, urls: ["https://www.romania-insider.com/feed", "https://www.romania-insider.com/"]}
+  - {id: pan_baltic_times, tier: broadcaster, country: "—", name: "The Baltic Times", lang: en, license: broadcaster_snippet, urls: ["https://www.baltictimes.com/rss/", "https://www.baltictimes.com/"]}
+
+  # ===================== EU INSTITUTIONS (owner, 2026-11-19: planned "EU and member states" section) =====================
+  # Already in sources.yaml and healthy from Actions: Commission press corner, Council press
+  # releases, ECB (3), EMA, ECDC (2), EEA (2), Euractiv, Euronews; Parliament, Eurostat and ENISA
+  # via Google News. These are the bodies that deal with single member states most often.
+  - {id: eu_eeas_press, tier: eu, country: EU, name: "EEAS: press material", lang: en, license: eu_reuse, urls: ["https://www.eeas.europa.eu/eeas/press-material_en", "https://www.eeas.europa.eu/_en"]}
+  - {id: eu_curia_press, tier: eu, country: EU, name: "Court of Justice of the EU: press releases", lang: en, license: eu_reuse, urls: ["https://curia.europa.eu/jcms/jcms/Jo2_7052/en/", "https://curia.europa.eu/jcms/jcms/j_6/en/"]}
+  - {id: eu_eca_news, tier: eu, country: EU, name: "European Court of Auditors: news", lang: en, license: eu_reuse, urls: ["https://www.eca.europa.eu/en/rss", "https://www.eca.europa.eu/en/news"]}
+  - {id: eu_eppo_news, tier: eu, country: EU, name: "European Public Prosecutor's Office: news", lang: en, license: eu_reuse, urls: ["https://www.eppo.europa.eu/en/rss.xml", "https://www.eppo.europa.eu/en/news"]}
+  - {id: eu_frontex_news, tier: eu, country: EU, name: "Frontex: news releases", lang: en, license: eu_reuse, urls: ["https://www.frontex.europa.eu/media-centre/news/news-release/", "https://www.frontex.europa.eu/"]}
+  - {id: eu_europol_news, tier: eu, country: EU, name: "Europol: newsroom", lang: en, license: eu_reuse, urls: ["https://www.europol.europa.eu/media-press/newsroom", "https://www.europol.europa.eu/"]}
+  - {id: eu_eib_press, tier: eu, country: EU, name: "European Investment Bank: press releases", lang: en, license: eu_reuse, urls: ["https://www.eib.org/en/press/index.htm", "https://www.eib.org/en/"]}
+  - {id: pan_euobserver, tier: broadcaster, country: "—", name: "EUobserver", lang: en, license: broadcaster_snippet, urls: ["https://euobserver.com/rss.xml", "https://euobserver.com/"]}

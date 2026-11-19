@@ -12,3 +12,4 @@ logs/
 .fastembed_cache/
 .events_cache/
 site/story/
+site/pairs/
