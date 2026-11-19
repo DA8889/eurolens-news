@@ -64,3 +64,28 @@ def parse_pair(text):
     if len(parts) != 2 or None in parts or parts[0] == parts[1]:
         return None
     return pair_key(*parts)
+
+
+def parse_group(text):
+    """The sorted, de-duplicated codes of free text such as "DK-AT-de" (2 or more countries
+    acting together), or None unless every code is one of the 28 and at least two differ.
+
+    >>> parse_group("DK-AT-de-NL"), parse_group("FR-DE"), parse_group("DE-DE"), parse_group("DE-FR-US")
+    (['AT', 'DE', 'DK', 'NL'], ['DE', 'FR'], None, None)
+    """
+    if not isinstance(text, str):
+        return None
+    parts = [to_canonical(p) for p in text.replace("/", "-").replace("_", "-").split("-")]
+    if None in parts or len(set(parts)) < 2:
+        return None
+    return sorted(set(parts))
+
+
+def group_pairs(codes):
+    """Every pair key among a group's codes.
+
+    >>> group_pairs(["DE", "AT", "DK"]), group_pairs(["FR", "DE"])
+    (['AT-DE', 'AT-DK', 'DE-DK'], ['DE-FR'])
+    """
+    codes = sorted(set(codes))
+    return [pair_key(a, b) for i, a in enumerate(codes) for b in codes[i + 1:]]

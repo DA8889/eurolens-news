@@ -6,12 +6,15 @@
 
 A pair is two of the 28 EuroLens countries (country_codes.py), stored alphabetically (pair_key:
 "DE-PL", "GB-IE"). Candidates are headlines with relevance >= MIN_RELEVANCE, the set cluster.py
-groups into events. Two Haiku steps: the tagger (prompts/PROMPT_VERSION.txt) proposes the pairs
-each headline is about, 40 headlines a call, quoting the words that name each side (a pair whose
-quotes are not in the headline is dropped); then the checker (prompts/CHECK_VERSION.txt) sees each
-proposal on its own line and gives a short reason before a true/false verdict. Alone, the tagger
-kept taking the outlet's country or the meeting's venue for a side (2026-11-19). Most headlines
-have no pair. Only headlines with a confirmed pair are written, to
+groups into events. Two Haiku steps: the tagger (prompts/PROMPT_VERSION.txt) proposes the
+countries each headline is about, 40 headlines a call: two countries, or several acting
+together, quoting the words that name each (an item whose quotes are not in the headline is
+dropped); then the checker (prompts/CHECK_VERSION.txt) sees each proposal on its own line and
+gives a short reason before a true/false verdict. A confirmed group puts the headline on the
+page of every pair among its countries (owner, 2026-11-19: "Germany, Denmark, Austria, Greece
+and the Netherlands unveil a Rwanda deal" belongs on all ten pages). Alone, the tagger kept
+taking the outlet's country or the meeting's venue for a side (2026-11-19). Most headlines have
+no pair. Only headlines with a confirmed pair are written, to
 pairtags/YYYY/MM/<item's archive day>.jsonl:
     {"id", "pairs", "why": {pair: checker's reason}, "version", "fetched_at", "tagged_at",
      "title", "url", "source_name", "source_country_raw", "lang", "published_at"}
@@ -35,22 +38,33 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from collect import ARCHIVE, ROOT, SCORES, iso, read_archive
-from country_codes import COUNTRIES, NAMES, pair_key, parse_pair
+from country_codes import COUNTRIES, NAMES, group_pairs, pair_key, parse_group, parse_pair, to_canonical
 from score import (COSTS, DAILY_BUDGET, MODEL, WORKERS, InsufficientCredits, Meter, chat, gloss, parse_json,
                    spent_today, title_key)
 
 # v1 and v2 (2026-11-19, scratch only) took the outlet's country, or the language, for a side, and a
-# meeting's venue for a party; v3 has Haiku quote the headline words naming each side.
-PROMPT_VERSION = "pairs_v3"
-CHECK_VERSION = "pairs_check_v1"
+# meeting's venue for a party; v3 has Haiku quote the headline words naming each side. v4 and
+# check v2 follow the owner's notes on the first review (2026-11-19): countries acting together
+# make one item for all their pairs; comparisons of two countries and a company of one in a story
+# about the other count; people in EU, NATO or UN posts and the EU institutions are no country.
+PROMPT_VERSION = "pairs_v4"
+CHECK_VERSION = "pairs_check_v2"
 MIN_RELEVANCE = 4      # as cluster.py: pair news is shown as events
 CHUNK = 40
-RUN_BUDGET = 0.05      # USD per run; about $0.03-0.05 a day
+# The tagger misses at random (a headline found in one run, not the next), so it is asked twice
+# and the checker judges the union: on the gold set at production density, recall 0.77 -> 0.82 at
+# the same precision (0.94) for about $0.06 more a day (2026-11-19).
+TAG_PASSES = 2
+RUN_BUDGET = 0.05      # USD per run; about $0.13 a day
 BACKFILL_DAYS = 3      # after a prompt change
 PAIRTAGS = ROOT / "pairtags"
 PROGRESS = PAIRTAGS / "progress.json"
 DISPLAY = ("title", "url", "source_name", "source_country_raw", "lang", "published_at")
 OFFICIAL = ("government", "parliament", "central_bank")   # publishers that are a side of their own news
+# People in EU, NATO or UN posts, whose names never stand for their home country. Both prompts say
+# so, yet "Portugal pushes back against Rutte criticism" kept coming back as NL-PT (2026-11-19), so
+# a quote naming one of them grounds nothing. Update when the posts change hands.
+POSTS = ("rutte", "von der leyen", "kallas", "costa", "metsola", "lagarde", "guterres")
 
 
 def system_prompt():
@@ -111,35 +125,42 @@ def plain(text):
 
 
 def grounded(item, r):
-    """The pair key of one answer item [pair, words for one side, words for the other], or None
-    unless both quotes are in the headline. "official" stands for an official publisher's own side.
+    """The group key ("DE-PL", "AT-DE-DK") of one answer item [codes joined by "-", then the words
+    naming each country in that order], or None unless every quote is in the headline. "official"
+    stands for an official publisher's own country.
 
     >>> r = {"title": "Minister met her Latvian counterpart", "tier": "government", "source_country_raw": "EE"}
     >>> grounded(["LV-EE", "official", "latvian"], r), grounded(["EE-PL", "official", "Polish"], r), grounded(["FI-LV", "official", "Latvian"], r)
     ('EE-LV', None, None)
+    >>> grounded(["NL-PT", "Rutte", "Portugal"], {"title": "Portugal pushes back against Rutte criticism"})
+    >>> r = {"title": "Common declaration of the Baltic states on Rail Baltica"}
+    >>> grounded(["EE-LT-LV", "Baltic", "Baltic", "Baltic"], r), grounded(["EE-LT-LV", "Baltic", "Baltic"], r)
+    ('EE-LT-LV', None)
     """
-    if not (isinstance(item, list) and len(item) == 3 and all(isinstance(x, str) and x.strip() for x in item)):
+    if not (isinstance(item, list) and len(item) >= 3 and all(isinstance(x, str) and x.strip() for x in item)):
         return None
-    pair = parse_pair(item[0])
-    if not pair:
+    codes = [to_canonical(c) for c in item[0].replace("/", "-").split("-")]
+    group = parse_group(item[0])
+    if not group or len(item) != len(codes) + 1:
         return None
     title = plain(r["title"])
-    official = r.get("tier") in OFFICIAL and r.get("source_country_raw") in pair.split("-")
-    ok = lambda q: plain(q) in title or (official and plain(q) == "official")
-    return pair if ok(item[1]) and ok(item[2]) else None
+    official = r.get("tier") in OFFICIAL and r.get("source_country_raw") in group
+    ok = lambda q: ((plain(q) in title and not any(p in plain(q) for p in POSTS))
+                    or (official and plain(q) == "official"))
+    return "-".join(group) if all(ok(q) for q in item[1:]) else None
 
 
 def parse_pairs(content, records):
-    """{line number: [pair keys]} for lines with at least one grounded pair (see grounded). Codes are
-    made canonical (UK -> GB, GR -> EL) and sorted; codes outside the 28 and same-country pairs are
-    dropped, and so is every pair of a line whose pairs span four or more countries (multilateral).
+    """{line number: [group keys]} for lines with at least one grounded item (see grounded). Codes
+    are made canonical (UK -> GB, GR -> EL) and sorted; items with codes outside the 28, or fewer
+    than two different countries, are dropped.
 
     >>> recs = [{"title": "Merz meets Tusk in Warsaw"}, {"title": "Kallas skipped as Poland joins talks"},
     ...         {"title": "Vienna, Berlin, Athens and Copenhagen back return hubs"}, {"title": "Cyprus hosts Greek PM, then flies to London"}]
     >>> parse_pairs('{"1": [["PL-DE", "Tusk", "merz"], ["DE-FR", "Merz", "Macron"]], "2": [["EE-PL", "Kallas", "Estonia"]], '
-    ...             '"3": [["AT-DE", "Vienna", "Berlin"], ["EL-DK", "Athens", "Copenhagen"]], '
+    ...             '"3": [["AT-DE-EL-DK", "Vienna", "Berlin", "Athens", "Copenhagen"]], '
     ...             '"4": [["CY-EL", "Cyprus", "Greek PM"], ["UK-CY", "London", "Cyprus"]], "9": [["AT-DE", "a", "b"]]}', recs)
-    {1: ['DE-PL'], 4: ['CY-EL', 'CY-GB']}
+    {1: ['DE-PL'], 3: ['AT-DE-DK-EL'], 4: ['CY-EL', 'CY-GB']}
     """
     data = final_json(content)
     if not isinstance(data, dict):
@@ -147,20 +168,26 @@ def parse_pairs(content, records):
     out = {}
     for k, v in data.items():
         if k.isdigit() and 1 <= int(k) <= len(records) and isinstance(v, list):
-            got = list(dict.fromkeys(p for p in (grounded(x, records[int(k) - 1]) for x in v) if p))
-            if got and len({c for p in got for c in p.split("-")}) < 4:
+            got = list(dict.fromkeys(g for g in (grounded(x, records[int(k) - 1]) for x in v) if g))
+            if got:
                 out[int(k)] = got
     return out
 
 
 def tag_chunk(records, system, meter):
-    """{id: [pairs]} for every record ([] = none), or None if the model failed twice."""
+    """{id: [group keys]} for every record ([] = none), or None if the model failed twice. An answer
+    cut off by the token cap is asked again as two halves: a chunk of 40 summit headlines with a
+    pair on every line outgrew the old cap on every try (2026-11-19)."""
     user = "\n".join(pair_line(i, r) for i, r in enumerate(records, 1))
     for _ in range(2):
         if meter.exhausted():
             return None
-        content, finish, usage = chat(MODEL, system, user, 20 * len(records) + 100)
+        content, finish, usage = chat(MODEL, system, user, 45 * len(records) + 200)
         meter.add(usage)
+        if finish == "length" and len(records) > 1:
+            halves = [tag_chunk(records[:len(records) // 2], system, meter),
+                      tag_chunk(records[len(records) // 2:], system, meter)]
+            return None if None in halves else {**halves[0], **halves[1]}
         if finish == "length":
             continue
         try:
@@ -172,7 +199,7 @@ def tag_chunk(records, system, meter):
 
 
 def tag_all(records, system, meter):
-    """({id: [pairs]}, all chunks answered?) with exact-duplicate titles asked once."""
+    """({id: [group keys]}, all chunks answered?) with exact-duplicate titles asked once."""
     groups = defaultdict(list)
     for r in records:
         groups[title_key(r["title"])].append(r)
@@ -204,16 +231,29 @@ def parse_checks(content, n):
             if k.isdigit() and 1 <= int(k) <= n and isinstance(v, list) and len(v) == 2 and isinstance(v[1], bool)}
 
 
+def names(group):
+    """ "Germany and Poland", "Austria, Denmark and Germany"
+
+    >>> names("DE-PL"), names("AT-DE-DK")
+    ('Germany and Poland', 'Austria, Germany and Denmark')
+    """
+    n = [NAMES[c] for c in group.split("-")]
+    return ", ".join(n[:-1]) + " and " + n[-1]
+
+
 def check_chunk(items, system, meter):
-    """{(id, pair): (reason, verdict)} for every (record, pair) item, or None if the model failed
-    twice or left lines unanswered."""
-    user = "\n".join(f"{pair_line(i, r)} || {' and '.join(NAMES[c] for c in p.split('-'))}"
-                     for i, (r, p) in enumerate(items, 1))
+    """{(id, group): (reason, verdict)} for every (record, group) item, or None if the model failed
+    twice or left lines unanswered. A cut-off answer is asked again as two halves (see tag_chunk)."""
+    user = "\n".join(f"{pair_line(i, r)} || {names(g)}" for i, (r, g) in enumerate(items, 1))
     for _ in range(2):
         if meter.exhausted():
             return None
-        content, finish, usage = chat(MODEL, system, user, 40 * len(items) + 60)
+        content, finish, usage = chat(MODEL, system, user, 50 * len(items) + 100)
         meter.add(usage)
+        if finish == "length" and len(items) > 1:
+            halves = [check_chunk(items[:len(items) // 2], system, meter),
+                      check_chunk(items[len(items) // 2:], system, meter)]
+            return None if None in halves else {**halves[0], **halves[1]}
         if finish == "length":
             continue
         try:
@@ -227,25 +267,45 @@ def check_chunk(items, system, meter):
 
 def tag_and_check(records, tagger, checker, meter):
     """({id: [confirmed pairs]}, {id: [proposed pairs]}, {(id, pair): (reason, verdict)}, all answered?)
-    The tagger proposes pairs for every record; the checker judges each proposal, once per title."""
-    proposed, complete = tag_all(records, tagger, meter)
+    The tagger proposes groups for every record, TAG_PASSES times; the checker judges each group
+    once per title, and its verdict and reason go to every pair in the group (a pair in a confirmed
+    group is confirmed).
+
+    >>> import pairs
+    >>> pairs.tag_all = lambda records, system, meter: ({"a": ["AT-DE-DK", "DE-PL"]}, True)
+    >>> pairs.check_chunk = lambda items, system, meter: {("a", "AT-DE-DK"): ("joint deal", True), ("a", "DE-PL"): ("venue", False)}
+    >>> c, p, v, ok = pairs.tag_and_check([{"id": "a", "title": "t"}], "", "", None)
+    >>> c, p["a"], v["a", "DE-DK"], v["a", "DE-PL"], ok
+    ({'a': ['AT-DE', 'AT-DK', 'DE-DK']}, ['AT-DE', 'AT-DK', 'DE-DK', 'DE-PL'], ('joint deal', True), ('venue', False), True)
+    """
+    proposed, complete = defaultdict(list), True
+    for _ in range(TAG_PASSES):
+        got, ok = tag_all(records, tagger, meter)
+        complete = complete and ok
+        for i, gs in got.items():
+            proposed[i] = list(dict.fromkeys(proposed[i] + gs))
     by_id = {r["id"]: r for r in records}
     groups = defaultdict(list)
-    for i, ps in proposed.items():
-        for p in ps:
-            groups[title_key(by_id[i]["title"]), p].append(i)
-    items = [(by_id[ids[0]], p) for (_, p), ids in groups.items()]
-    verdicts = {}
+    for i, gs in proposed.items():
+        for g in gs:
+            groups[title_key(by_id[i]["title"]), g].append(i)
+    items = [(by_id[ids[0]], g) for (_, g), ids in groups.items()]
+    judged = {}
     with ThreadPoolExecutor(WORKERS) as pool:
         for got in pool.map(lambda c: check_chunk(c, checker, meter),
                             [items[k:k + CHUNK] for k in range(0, len(items), CHUNK)]):
             if got is None:
                 complete = False
             else:
-                verdicts.update(got)
-    for (_, p), ids in groups.items():
-        if (ids[0], p) in verdicts:
-            verdicts.update({(i, p): verdicts[ids[0], p] for i in ids[1:]})
+                judged.update(got)
+    verdicts = {}
+    for (_, g), ids in groups.items():
+        if (ids[0], g) in judged:
+            for i in ids:
+                for p in group_pairs(g.split("-")):
+                    if not verdicts.get((i, p), ("", False))[1]:
+                        verdicts[i, p] = judged[ids[0], g]
+    proposed = {i: list(dict.fromkeys(p for g in gs for p in group_pairs(g.split("-")))) for i, gs in proposed.items()}
     confirmed = {i: [p for p in ps if verdicts.get((i, p), ("", False))[1]] for i, ps in proposed.items()}
     return confirmed, proposed, verdicts, complete
 
@@ -419,7 +479,7 @@ def review(now, repeats, budget, rejected_max=100, misses_max=60):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--test", help="gold CSV (id, pair, expect, label, note, title, title_en, lang, country, source)")
+    ap.add_argument("--test", help="gold CSV (id, pair, expect, label, by, note, title, title_en, lang, country, source, tier)")
     ap.add_argument("--review", action="store_true", help="local: write a labelling workbook from the last 3 days")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--budget", type=float, default=RUN_BUDGET, help="USD cap for this run")
