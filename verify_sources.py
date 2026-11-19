@@ -72,12 +72,21 @@ def probe_gdelt():
     try:
         resp = requests.get(GDELT_LASTUPDATE, timeout=30, headers={"User-Agent": USER_AGENT})
         resp.raise_for_status()
-        export_url = next(line.split()[2] for line in resp.text.splitlines()
-                          if line.strip().endswith(".export.CSV.zip"))
-        z = requests.get(export_url, timeout=120, headers={"User-Agent": USER_AGENT})
+        listed = next(line.split()[2] for line in resp.text.splitlines()
+                      if line.strip().endswith(".export.CSV.zip"))
+        # lastupdate.txt can name a file before it is uploaded (404 on 2026-11-19), so step back
+        # 15 minutes at a time, up to three times.
+        stamp = datetime.strptime(listed.rsplit("/", 1)[-1][:14], "%Y%m%d%H%M%S")
+        for back in range(4):
+            export_url = listed.replace(f"{stamp:%Y%m%d%H%M%S}", f"{stamp - timedelta(minutes=15 * back):%Y%m%d%H%M%S}")
+            z = requests.get(export_url, timeout=120, headers={"User-Agent": USER_AGENT})
+            if z.status_code != 404:
+                break
         z.raise_for_status()
     except Exception as e:
         return out + [f"Failed: {type(e).__name__}: {str(e)[:300]}"]
+    if export_url != listed:
+        out.append(f"- `lastupdate.txt` named `{listed.rsplit('/', 1)[-1]}`, which was not there yet (404)")
     with zipfile.ZipFile(io.BytesIO(z.content)) as zf:
         text = zf.read(zf.namelist()[0]).decode("utf-8", errors="replace")
     rows = [r for r in csv.reader(io.StringIO(text), delimiter="\t") if len(r) > COL["url"]]
