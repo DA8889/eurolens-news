@@ -110,15 +110,49 @@ def clean_snippet(text):
 
 
 def strip_publisher(title, publisher):
-    """Google News appends ' - Publisher' to every title; drop it.
+    """Google News appends ' - Publisher' to every title; drop it, and the outlet's own copy when its
+    page title already ended with its name (" - SZ.de - SZ.de", " — Cyprus Mail").
 
     >>> strip_publisher("Talks resume - Le Monde", "Le Monde")
     'Talks resume'
-    >>> strip_publisher("Talks resume", "Le Monde")
-    'Talks resume'
+    >>> strip_publisher("Talks resume", "Le Monde"), strip_publisher("Streik in Bayern - SZ.de - SZ.de", "SZ.de")
+    ('Talks resume', 'Streik in Bayern')
+    >>> strip_publisher("Summit on cables — Cyprus Mail", "Cyprus Mail"), strip_publisher("Cyprus Mail", "Cyprus Mail")
+    ('Summit on cables', 'Cyprus Mail')
     """
-    suffix = f" - {publisher}"
-    return title[:-len(suffix)] if publisher and title.endswith(suffix) else title
+    if not publisher:
+        return title
+    tail = re.compile(rf"\s+[-–—|]\s+{re.escape(publisher)}\s*$", re.I)
+    while tail.search(title):
+        title = tail.sub("", title)
+    return title
+
+
+# Format markers outlets put around a headline (counted over 30 days to 2026-11-20: "VIDEO:" or
+# "VIDEO |" about 200 times, "FOTO:" 55, LSM's "/ Raksts", Latvian for "article", 308, "(VIDEO)",
+# "(ВИДЕО)", "(WIDEO)"), and live-coverage markers. Words that say what kind of piece it is
+# (EXCLUSIVE, INTERVIEW, an editorial's LEDARE) are kept.
+MARKER = (r"(?:VIDEOS?|FOTOS?|FOTOD|FOTKY|PHOTOS?|AUDIO|GALLERY|GALERIE|GALERII|GALERIJA|WIDEO|ZDJĘCIA|WATCH|"
+          r"LIVE|ONLINE|LIVEBLOG|TIEŠRAIDE|ŽIVĚ|НА ЖИВО|ВИДЕО|СНИМКИ|ΒΙΝΤΕΟ|ΦΩΤΟ)")
+MARKERS = rf"{MARKER}(?:\s*[/+&,]\s*{MARKER})*"
+LEAD_MARKER = re.compile(rf"^\s*(?:[\[(]\s*{MARKERS}\s*[\])]\s*[:|]?|{MARKERS}\s*[:|])\s*", re.I)
+TRAIL_MARKER = re.compile(rf"\s*(?:[\[(]\s*{MARKERS}\s*[\])]|\s[/|]\s*(?:Raksts|Article))\s*$", re.I)
+
+
+def tidy_title(title):
+    """A headline without the format markers around it; unchanged if nothing else would be left.
+
+    >>> tidy_title("VIDEO: Kulberga jaunā valdība sanāk uz svinīgo sēdi / Raksts")
+    'Kulberga jaunā valdība sanāk uz svinīgo sēdi'
+    >>> tidy_title("FOTO/VIDEO | Protest in Riga"), tidy_title("Fire in Sofia (ВИДЕО+СНИМКИ)"), tidy_title("[WIDEO] Tusk w Berlinie")
+    ('Protest in Riga', 'Fire in Sofia', 'Tusk w Berlinie')
+    >>> tidy_title("VIDEO: Kulbergs' new government meets at midnight / Article"), tidy_title("LIVE | Ukraine talks")
+    ("Kulbergs' new government meets at midnight", 'Ukraine talks')
+    >>> tidy_title("EXCLUSIVE: Minister resigns"), tidy_title("Live music returns to Vilnius"), tidy_title("VIDEO")
+    ('EXCLUSIVE: Minister resigns', 'Live music returns to Vilnius', 'VIDEO')
+    """
+    out = TRAIL_MARKER.sub("", LEAD_MARKER.sub("", title)).strip()
+    return out or title
 
 
 def iso(dt):
@@ -167,6 +201,7 @@ def fetch_feed(feed, fetched_at):
         if publisher and "news.google.com" in feed["url"]:
             title = strip_publisher(title, publisher)
             source_name = f"{publisher} (via Google News)"
+        title = tidy_title(strip_publisher(title, feed["name"]))
         url = normalize_url(link)
         records.append({
             "id": hashlib.sha1(url.encode()).hexdigest(),

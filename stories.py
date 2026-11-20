@@ -56,7 +56,7 @@ import numpy as np
 import cluster
 import pair_news
 import summarize
-from collect import ARCHIVE, ROOT, SCORES, SITE, iso, read_archive, read_tags
+from collect import ARCHIVE, ROOT, SCORES, SITE, iso, read_archive, read_tags, tidy_title
 from score import (COSTS, DAILY_BUDGET, MODEL, Meter, chat, gloss, parse_json, spent_today,
                    strip_em_dashes)
 
@@ -323,7 +323,7 @@ def translate(now, english, heads, meter, save=True):
     todo = {i: t for i, t, lang in heads if i and lang != "en" and i not in english}
     if not todo or meter.exhausted():
         return english
-    got = gloss([{"id": i, "title": t} for i, t in todo.items()], meter)
+    got = {i: tidy_title(t) for i, t in gloss([{"id": i, "title": t} for i, t in todo.items()], meter).items()}
     english.update(got)
     if save and got:
         ENGLISH.mkdir(parents=True, exist_ok=True)
