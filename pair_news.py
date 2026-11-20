@@ -1,4 +1,6 @@
-"""Pair news files for the EuroLens Relations pages: the stories between two countries over 90 days.
+"""Pair news files for the EuroLens Relations pages: the stories between two countries over 90 days;
+and site/eu.json for the News page's EU institutions section: the stories between the EU
+institutions and each country over 30 days (EU_INSTITUTIONS_NEWS.md).
 
 Called from stories.write() each run, after the events and storylines are built. No AI writes
 anything here except English translations of headlines (stories.translate, phrasing only).
@@ -31,6 +33,13 @@ anything here except English translations of headlines (stories.translate, phras
      site/pairs/index.json    {"updated", "pairs": {PAIR: {"events_90d", "last_event"}}}
    story_id is set only for storylines whose site/story/<id>.json this run writes, so links never
    break. A pair with no events gets no file: a missing file means no recent pair news.
+5. EU institutions (build_eu): the headlines pairs.py tagged with "eu" countries, mapped, counted
+   (qualifies, per country) and merged in the same way, except that events merge only when they
+   share a country, so similar news for two countries (a fund payment to each) stays two rows.
+     site/eu.json             {"updated", "window_days", "rows": [newest first, each row as in a
+                              pair file plus "countries" (alphabetical); a row is kept while it
+                              is among the newest EU_MAX_ROWS of at least one of its countries]}
+   Always written while scoring runs, so an empty "rows" means no news, not "switched off".
 """
 import json
 from collections import Counter, defaultdict
@@ -44,6 +53,8 @@ from pairs import PAIRTAGS, read_pairtags
 
 WINDOW_DAYS = 90
 MAX_EVENTS = 30
+EU_WINDOW_DAYS = 30    # owner, 2026-11-20 (the plan's recommendation): these stories move faster
+EU_MAX_ROWS = 30       # per country
 # Tested 2026-11-19 on the preview pair files (129 events): at 0.6 the Iceye bid's seven headlines
 # in four languages made one row and Estonia-Latvia's nine rows became five; 0.65 split the bid again.
 GROUP_THRESHOLD = 0.6
@@ -52,6 +63,7 @@ EVENT_MAP = PAIRTAGS / "events"
 ENGLISH = cluster.EVENTS / "en"                       # stories.py's translation cache
 PAIR_VECTORS = cluster.ROOT / ".events_cache" / "pair_vectors.npz"   # kept by actions/cache
 FOLDER = SITE / "pairs"
+EU_FILE = SITE / "eu.json"
 
 
 def months(now):
@@ -137,32 +149,37 @@ def vectors(lines, english):
     return {i: v / np.linalg.norm(v) for i, v in out.items()}
 
 
-def merge(events, vecs):
+def merge(events, vecs, sides=None):
     """[(event id, lines)] of one pair, with events about the same story merged: oldest first, an
     event joins the group whose centre (the mean of its headlines' vectors) is most similar, if the
     cosine is at least GROUP_THRESHOLD and the group has a headline from the GROUP_DAYS before the
-    event's first. A group keeps its oldest event's id.
+    event's first. A group keeps its oldest event's id. With `sides` ({event id: set of
+    countries}), an event joins only a group that shares one of its countries.
 
     >>> v = {"a": np.array([1.0, 0.0]), "b": np.array([0.8, 0.6]), "c": np.array([0.0, 1.0]), "d": np.array([1.0, 0.0])}
     >>> l = lambda i, d: {"id": i, "fetched_at": f"2026-11-{d:02d}T00:00:00Z", "published_at": None}
     >>> [(e, [x["id"] for x in ls]) for e, ls in merge([("e2", [l("b", 2)]), ("e1", [l("a", 1)]), ("e3", [l("c", 3)]), ("e4", [l("d", 20)])], v)]
     [('e1', ['a', 'b']), ('e3', ['c']), ('e4', ['d'])]
+    >>> [(e, [x["id"] for x in ls]) for e, ls in merge([("e2", [l("b", 2)]), ("e1", [l("a", 1)])], v, {"e1": {"HU"}, "e2": {"PL"}})]
+    [('e1', ['a']), ('e2', ['b'])]
     """
     unit = lambda x: x / np.linalg.norm(x)
-    groups = []   # [sum of vectors or None, newest stamp, event id, lines]
+    groups = []   # [sum of vectors or None, newest stamp, event id, lines, countries]
     for event, lines in sorted(events, key=lambda e: (min(map(stamp, e[1])), e[0])):
         vs = [vecs[l["id"]] for l in lines if l["id"] in vecs]
         total = np.sum(vs, axis=0) if vs else None
         since = iso(datetime.strptime(min(map(stamp, lines)), "%Y-%m-%dT%H:%M:%SZ") - timedelta(days=GROUP_DAYS))
+        mine = sides[event] if sides else set()
         sims = [(float(unit(g[0]) @ unit(total)), k) for k, g in enumerate(groups)
-                if total is not None and g[0] is not None and g[1] >= since]
+                if total is not None and g[0] is not None and g[1] >= since and (not sides or g[4] & mine)]
         best = max(sims, default=None)
         if best and best[0] >= GROUP_THRESHOLD:
             g = groups[best[1]]
             g[0], g[1] = g[0] + total, max(g[1], max(map(stamp, lines)))
             g[3].extend(lines)
+            g[4] |= mine
         else:
-            groups.append([total, max(map(stamp, lines)), event, list(lines)])
+            groups.append([total, max(map(stamp, lines)), event, list(lines), set(mine)])
     return [(g[2], g[3]) for g in groups]
 
 
@@ -227,9 +244,42 @@ def build(tags, event_map, story_of, english, vecs):
             for pair, es in events.items()}
 
 
+def build_eu(tags, event_map, story_of, english, vecs):
+    """[rows, newest first] between the EU institutions and the countries, from {headline id:
+    pairtags line}; each row as in a pair file plus its "countries" (see the module notes, 5).
+
+    >>> line = lambda i, eu, d: {"id": i, "pairs": [], "eu": eu, "title": i, "url": i, "source_name": "S", "source_country_raw": "EU",
+    ...                          "lang": "en", "published_at": f"2026-11-{d}T10:00:00Z", "fetched_at": f"2026-11-{d}T10:05:00Z"}
+    >>> tags = {"a": line("a", ["HU"], 17), "b": line("b", ["HU", "PL"], 18), "c": line("c", ["SK"], 18), "d": line("d", ["AT"], 19)}
+    >>> m = {"a": {"event": "e1", "articles": 5}, "b": {"event": "e1", "articles": 5}, "c": {"event": "e3", "articles": 9}}
+    >>> [(r["event_id"], r["countries"], len(r["articles"])) for r in build_eu(tags, m, {}, {}, {})]
+    [('d', ['AT'], 1), ('e1', ['HU'], 2)]
+    """
+    groups = defaultdict(list)
+    for line in tags.values():
+        m = event_map.get(line["id"], {"event": line["id"], "articles": 1})
+        for c in line.get("eu", []):
+            groups[c, m["event"]].append((line, m["articles"]))
+    lines, sides = defaultdict(dict), defaultdict(set)
+    for (c, event), members in groups.items():
+        if qualifies(len(members), max(n for _, n in members)):
+            lines[event].update((l["id"], l) for l, _ in members)
+            sides[event].add(c)
+    event_of = lambda l: event_map.get(l["id"], {"event": l["id"]})["event"]
+    rows = sorted(({**row(e, ls, story_of, english, vecs), "countries": sorted({c for l in ls for c in sides[event_of(l)]})}
+                   for e, ls in merge([(e, list(v.values())) for e, v in lines.items()], vecs, sides)),
+                  key=lambda r: (r["last_seen"], r["event_id"]), reverse=True)
+    shown, keep = Counter(), []
+    for r in rows:
+        if any(shown[c] < EU_MAX_ROWS for c in r["countries"]):
+            keep.append(r)
+        shown.update(r["countries"])
+    return keep
+
+
 def update(now, events, developing, english, meter, translate):
-    """Map this run's events, then write site/pairs/. `developing` are the storylines with a
-    site/story/ file this run; `translate` is stories.translate."""
+    """Map this run's events, then write site/pairs/ and site/eu.json. `developing` are the
+    storylines with a site/story/ file this run; `translate` is stories.translate."""
     since = iso(now - timedelta(days=WINDOW_DAYS))
     tags = {i: l for i, l in read_pairtags(now, WINDOW_DAYS + 1).items() if stamp(l) >= since}
     stored = read_event_map(now)
@@ -242,7 +292,8 @@ def update(now, events, developing, english, meter, translate):
     story_of = {m: s for s in developing for e in s["events"] for m in e["member_ids"]}
     english = translate(now, {**read_english(now), **english},
                         [(l["id"], l["title"], l.get("lang")) for l in tags.values()], meter)
-    out = build(tags, stored, story_of, english, vectors(list(tags.values()), english))
+    vecs = vectors(list(tags.values()), english)
+    out = build(tags, stored, story_of, english, vecs)
 
     FOLDER.mkdir(parents=True, exist_ok=True)
     updated = iso(now)
@@ -259,5 +310,11 @@ def update(now, events, developing, english, meter, translate):
     (FOLDER / "index.json").write_text(json.dumps(
         {"updated": updated, "pairs": {p: {"events_90d": len(es), "last_event": es[0]["last_seen"][:10]}
                                        for p, es in sorted(out.items())}}, separators=(",", ":")), encoding="utf-8")
+
+    eu_since = iso(now - timedelta(days=EU_WINDOW_DAYS))
+    eu = build_eu({i: l for i, l in tags.items() if l.get("eu") and stamp(l) >= eu_since}, stored, story_of, english, vecs)
+    EU_FILE.write_text(json.dumps({"updated": updated, "window_days": EU_WINDOW_DAYS, "rows": eu},
+                                  ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"pair news: {len(tags)} tagged headlines, {len(new)} new event-map lines, "
-          f"{sum(len(es) for es in out.values())} rows in {len(out)} pair files")
+          f"{sum(len(es) for es in out.values())} rows in {len(out)} pair files; "
+          f"{len(eu)} EU institutions rows for {len({c for r in eu for c in r['countries']})} countries")

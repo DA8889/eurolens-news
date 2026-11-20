@@ -14,12 +14,16 @@ gives a short reason before a true/false verdict. A confirmed group puts the hea
 page of every pair among its countries (owner, 2026-11-19: "Germany, Denmark, Austria, Greece
 and the Netherlands unveil a Rwanda deal" belongs on all ten pages). Alone, the tagger kept
 taking the outlet's country or the meeting's venue for a side (2026-11-19). Most headlines have
-no pair. Only headlines with a confirmed pair are written, to
-pairtags/YYYY/MM/<item's archive day>.jsonl:
-    {"id", "pairs", "why": {pair: checker's reason}, "version", "fetched_at", "tagged_at",
-     "title", "url", "source_name", "source_country_raw", "lang", "published_at"}
-The display fields are copied so pair_news.py can build 90 days of pair files from this small
-store alone. pairtags/progress.json works as tags/progress.json does for tag.py: a change to
+no pair.
+The same two steps tag news between the EU institutions and a country (EU_INSTITUTIONS_NEWS.md):
+an item "EU-HU" or "EU-BE-FR" puts the headline under each of its countries in the field "eu",
+never under a pair between them. Only headlines with a confirmed pair or EU country are written,
+to pairtags/YYYY/MM/<item's archive day>.jsonl:
+    {"id", "pairs", "eu": [countries], "why": {pair or "EU-XX": checker's reason}, "version",
+     "fetched_at", "tagged_at", "title", "url", "source_name", "source_country_raw", "lang",
+     "published_at"}
+The display fields are copied so pair_news.py can build the pair files and site/eu.json from this
+small store alone. pairtags/progress.json works as tags/progress.json does for tag.py: a change to
 either prompt re-tags the last BACKFILL_DAYS days, older lines keep their tags (read_pairtags decides which
 line counts), and failed or unpaid calls are retried next run, never taken as "no pair". Costs
 go to scores/costs.jsonl under score.py's daily budget.
@@ -47,8 +51,10 @@ from score import (COSTS, DAILY_BUDGET, MODEL, WORKERS, InsufficientCredits, Met
 # check v2 follow the owner's notes on the first review (2026-11-19): countries acting together
 # make one item for all their pairs; comparisons of two countries and a company of one in a story
 # about the other count; people in EU, NATO or UN posts and the EU institutions are no country.
-PROMPT_VERSION = "pairs_v4"
-CHECK_VERSION = "pairs_check_v2"
+# v5 and check v3 (2026-11-20) add the EU institutions as a side of their own ("EU-HU"), for the
+# News page's EU institutions section; the pair rules are v4's.
+PROMPT_VERSION = "pairs_v5"
+CHECK_VERSION = "pairs_check_v3"
 MIN_RELEVANCE = 4      # as cluster.py: pair news is shown as events
 CHUNK = 40
 # The tagger misses at random (a headline found in one run, not the next), so it is asked twice
@@ -85,17 +91,22 @@ def prompts():
 
 def pair_line(n, r):
     """One numbered input line: N | language | outlet | headline. The outlet's country is given only
-    for official publishers; for news outlets it misled v1 into tagging outlet country + subject.
+    for official publishers, EU institutions included; for news outlets it misled v1 into tagging
+    outlet country + subject.
 
     >>> pair_line(2, {"lang": "en", "source_name": "Estonian govt", "tier": "government", "source_country_raw": "EE", "title": "PM  visits Riga"})
     '2 | en | Estonian govt (official, EE) | PM visits Riga'
     >>> pair_line(3, {"lang": "nl", "source_name": "NOS", "tier": "broadcaster", "source_country_raw": "NL", "title": "Brexit"})
     '3 | nl | NOS | Brexit'
+    >>> pair_line(4, {"lang": "en", "source_name": "EIB", "tier": "eu", "source_country_raw": "EU", "title": "Loan for Tampere"})
+    '4 | en | EIB (official, EU) | Loan for Tampere'
     """
     title = " ".join(r["title"].split())
     who = r.get("source_name") or "?"
     if r.get("tier") in OFFICIAL and r.get("source_country_raw") in NAMES:
         who = f"{who} (official, {r['source_country_raw']})"
+    elif r.get("tier") == "eu":
+        who = f"{who} (official, EU)"
     return f"{n} | {r.get('lang') or '?'} | {who} | {title}"
 
 
@@ -125,9 +136,11 @@ def plain(text):
 
 
 def grounded(item, r):
-    """The group key ("DE-PL", "AT-DE-DK") of one answer item [codes joined by "-", then the words
-    naming each country in that order], or None unless every quote is in the headline. "official"
-    stands for an official publisher's own country.
+    """The group key ("DE-PL", "AT-DE-DK", "EU-HU") of one answer item [codes joined by "-", then
+    the words naming each side in that order], or None unless every quote is in the headline.
+    "official" stands for an official publisher's own country, or for the EU when an EU
+    institution publishes. Names of people in international posts ground no country, but EU posts
+    may name the EU side.
 
     >>> r = {"title": "Minister met her Latvian counterpart", "tier": "government", "source_country_raw": "EE"}
     >>> grounded(["LV-EE", "official", "latvian"], r), grounded(["EE-PL", "official", "Polish"], r), grounded(["FI-LV", "official", "Latvian"], r)
@@ -136,24 +149,40 @@ def grounded(item, r):
     >>> r = {"title": "Common declaration of the Baltic states on Rail Baltica"}
     >>> grounded(["EE-LT-LV", "Baltic", "Baltic", "Baltic"], r), grounded(["EE-LT-LV", "Baltic", "Baltic"], r)
     ('EE-LT-LV', None)
+    >>> r = {"title": "Von der Leyen warns France and Belgium over deficits"}
+    >>> grounded(["EU-FR-BE", "von der Leyen", "France", "Belgium"], r), grounded(["FR-EU", "France", "Commission"], r)
+    ('EU-BE-FR', None)
+    >>> grounded(["EU-FI", "official", "Finnish"], {"title": "Finnish plant", "tier": "broadcaster"}), grounded(["EU-EU", "EU", "EU"], {"title": "EU"})
+    (None, None)
+    >>> grounded(["EU-UK", "official", "British"], {"title": "Talks with British side", "tier": "eu"})
+    'EU-GB'
+    >>> grounded(["DE-US", "German", "US"], {"title": "German and US talks"}), grounded(["EU-UA", "EU", "Ukraine"], {"title": "EU and Ukraine"})
+    (None, None)
     """
     if not (isinstance(item, list) and len(item) >= 3 and all(isinstance(x, str) and x.strip() for x in item)):
         return None
-    codes = [to_canonical(c) for c in item[0].replace("/", "-").split("-")]
-    group = parse_group(item[0])
-    if not group or len(item) != len(codes) + 1:
+    raw = [c.strip() for c in item[0].replace("/", "-").split("-")]
+    is_eu = [c.upper() == "EU" for c in raw]
+    codes = [to_canonical(c) for c, e in zip(raw, is_eu) if not e]
+    if len(item) != len(raw) + 1 or None in codes or sum(is_eu) > 1:
+        return None
+    group = sorted(set(codes))
+    if len(group) < (1 if any(is_eu) else 2):
         return None
     title = plain(r["title"])
     official = r.get("tier") in OFFICIAL and r.get("source_country_raw") in group
     ok = lambda q: ((plain(q) in title and not any(p in plain(q) for p in POSTS))
                     or (official and plain(q) == "official"))
-    return "-".join(group) if all(ok(q) for q in item[1:]) else None
+    ok_eu = lambda q: plain(q) in title or (r.get("tier") == "eu" and plain(q) == "official")
+    if not all(ok_eu(q) if e else ok(q) for q, e in zip(item[1:], is_eu)):
+        return None
+    return "-".join((["EU"] if any(is_eu) else []) + group)
 
 
 def parse_pairs(content, records):
     """{line number: [group keys]} for lines with at least one grounded item (see grounded). Codes
-    are made canonical (UK -> GB, GR -> EL) and sorted; items with codes outside the 28, or fewer
-    than two different countries, are dropped.
+    are made canonical (UK -> GB, GR -> EL) and sorted; items with codes outside the 28 (other
+    than one "EU"), or fewer than two different countries (one beside "EU"), are dropped.
 
     >>> recs = [{"title": "Merz meets Tusk in Warsaw"}, {"title": "Kallas skipped as Poland joins talks"},
     ...         {"title": "Vienna, Berlin, Athens and Copenhagen back return hubs"}, {"title": "Cyprus hosts Greek PM, then flies to London"}]
@@ -232,13 +261,27 @@ def parse_checks(content, n):
 
 
 def names(group):
-    """ "Germany and Poland", "Austria, Denmark and Germany"
+    """ "Germany and Poland", "Austria, Denmark and Germany", "the EU institutions with Hungary"
 
-    >>> names("DE-PL"), names("AT-DE-DK")
-    ('Germany and Poland', 'Austria, Germany and Denmark')
+    >>> names("DE-PL"), names("AT-DE-DK"), names("EU-HU"), names("EU-BE-FR")
+    ('Germany and Poland', 'Austria, Germany and Denmark', 'the EU institutions with Hungary', 'the EU institutions with Belgium and France')
     """
-    n = [NAMES[c] for c in group.split("-")]
+    codes = group.split("-")
+    if codes[0] == "EU":
+        return "the EU institutions with " + names("-".join(codes[1:])) if len(codes) > 2 else f"the EU institutions with {NAMES[codes[1]]}"
+    n = [NAMES[c] for c in codes]
     return ", ".join(n[:-1]) + " and " + n[-1]
+
+
+def expand(group):
+    """The labels a confirmed group puts its headline under: every pair among its countries, or for
+    an EU group "EU-" with each country (never a pair).
+
+    >>> expand("AT-DE-DK"), expand("EU-BE-FR")
+    (['AT-DE', 'AT-DK', 'DE-DK'], ['EU-BE', 'EU-FR'])
+    """
+    codes = group.split("-")
+    return [f"EU-{c}" for c in codes[1:]] if codes[0] == "EU" else group_pairs(codes)
 
 
 def check_chunk(items, system, meter):
@@ -266,17 +309,19 @@ def check_chunk(items, system, meter):
 
 
 def tag_and_check(records, tagger, checker, meter):
-    """({id: [confirmed pairs]}, {id: [proposed pairs]}, {(id, pair): (reason, verdict)}, all answered?)
-    The tagger proposes groups for every record, TAG_PASSES times; the checker judges each group
-    once per title, and its verdict and reason go to every pair in the group (a pair in a confirmed
-    group is confirmed).
+    """({id: [confirmed labels]}, {id: [proposed labels]}, {(id, label): (reason, verdict)}, all
+    answered?) Labels are pairs ("DE-PL") and EU labels ("EU-HU"). The tagger proposes groups for
+    every record, TAG_PASSES times; the checker judges each group once per title, and its verdict
+    and reason go to every label of the group (see expand; a label in a confirmed group is
+    confirmed).
 
     >>> import pairs
-    >>> pairs.tag_all = lambda records, system, meter: ({"a": ["AT-DE-DK", "DE-PL"]}, True)
-    >>> pairs.check_chunk = lambda items, system, meter: {("a", "AT-DE-DK"): ("joint deal", True), ("a", "DE-PL"): ("venue", False)}
+    >>> pairs.tag_all = lambda records, system, meter: ({"a": ["AT-DE-DK", "DE-PL", "EU-BE-FR"]}, True)
+    >>> pairs.check_chunk = lambda items, system, meter: {("a", "AT-DE-DK"): ("joint deal", True), ("a", "DE-PL"): ("venue", False),
+    ...                                                   ("a", "EU-BE-FR"): ("deficit warning", True)}
     >>> c, p, v, ok = pairs.tag_and_check([{"id": "a", "title": "t"}], "", "", None)
-    >>> c, p["a"], v["a", "DE-DK"], v["a", "DE-PL"], ok
-    ({'a': ['AT-DE', 'AT-DK', 'DE-DK']}, ['AT-DE', 'AT-DK', 'DE-DK', 'DE-PL'], ('joint deal', True), ('venue', False), True)
+    >>> c, p["a"], v["a", "DE-DK"], v["a", "DE-PL"], v["a", "EU-FR"], ok
+    ({'a': ['AT-DE', 'AT-DK', 'DE-DK', 'EU-BE', 'EU-FR']}, ['AT-DE', 'AT-DK', 'DE-DK', 'DE-PL', 'EU-BE', 'EU-FR'], ('joint deal', True), ('venue', False), ('deficit warning', True), True)
     """
     proposed, complete = defaultdict(list), True
     for _ in range(TAG_PASSES):
@@ -302,10 +347,10 @@ def tag_and_check(records, tagger, checker, meter):
     for (_, g), ids in groups.items():
         if (ids[0], g) in judged:
             for i in ids:
-                for p in group_pairs(g.split("-")):
+                for p in expand(g):
                     if not verdicts.get((i, p), ("", False))[1]:
                         verdicts[i, p] = judged[ids[0], g]
-    proposed = {i: list(dict.fromkeys(p for g in gs for p in group_pairs(g.split("-")))) for i, gs in proposed.items()}
+    proposed = {i: list(dict.fromkeys(p for g in gs for p in expand(g))) for i, gs in proposed.items()}
     confirmed = {i: [p for p in ps if verdicts.get((i, p), ("", False))[1]] for i, ps in proposed.items()}
     return confirmed, proposed, verdicts, complete
 
@@ -321,7 +366,7 @@ def read_pairtags(now, days):
     for line in read_archive(now, days, PAIRTAGS):
         if line["version"] == p["version"] or line["fetched_at"] < p["since"]:
             out[line["id"]] = line
-    return {k: v for k, v in out.items() if v["pairs"]}
+    return {k: v for k, v in out.items() if v["pairs"] or v.get("eu")}
 
 
 def candidates(now, days, since="", through=""):
@@ -341,31 +386,55 @@ def load_gold(path):
         return list(csv.DictReader(f))
 
 
-def score_run(gold, run):
-    """(true positives, false positives, false negatives) of one run against the gold rows.
-    A Y row is a pair the headline is about; any other pair the run gives that headline (including
-    on a "none" row) is a false positive.
+def label(text):
+    """A gold row's label in canonical form: a pair, an EU label, or None ("none").
+
+    >>> label("PL-DE"), label("eu-uk"), label("none")
+    ('DE-PL', 'EU-GB', None)
+    """
+    codes = str(text).replace("/", "-").split("-")
+    if len(codes) == 2 and codes[0].upper() == "EU":
+        c = to_canonical(codes[1])
+        return f"EU-{c}" if c else None
+    return parse_pair(text)
+
+
+def is_eu(lab):
+    return lab.startswith("EU-")
+
+
+def score_run(gold, run, eu=False):
+    """(true positives, false positives, false negatives) of one run against the gold rows, counting
+    labels of one kind: pairs, or with `eu` the EU labels. A Y row is a label the headline is about;
+    any other label of that kind the run gives the headline (including on a "none" row) is a false
+    positive.
 
     >>> gold = [{"id": "a", "pair": "DE-FR", "expect": "Y"}, {"id": "a", "pair": "DE-PL", "expect": "N"},
     ...         {"id": "b", "pair": "none", "expect": "N"}, {"id": "c", "pair": "GB-IE", "expect": "Y"}]
-    >>> score_run(gold, {"a": ["DE-FR", "DE-PL"], "b": ["AT-DE"], "c": []})
+    >>> score_run(gold, {"a": ["DE-FR", "DE-PL", "EU-FR"], "b": ["AT-DE"], "c": []})
     (1, 2, 1)
+    >>> score_run([{"id": "a", "pair": "EU-HU", "expect": "Y"}, {"id": "b", "pair": "none", "expect": "N"}],
+    ...           {"a": ["EU-HU", "AT-HU"], "b": ["EU-AT"]}, eu=True)
+    (1, 1, 0)
     """
     truth = defaultdict(set)
     for g in gold:
         truth[g["id"]]
-        if g["expect"] == "Y":
-            truth[g["id"]].add(parse_pair(g["pair"]))
+        lab = label(g["pair"])
+        if g["expect"] == "Y" and lab and is_eu(lab) == eu:
+            truth[g["id"]].add(lab)
     tp = fp = fn = 0
     for i, want in truth.items():
-        got = set(run.get(i, []))
+        got = {lab for lab in run.get(i, []) if is_eu(lab) == eu}
         tp, fp, fn = tp + len(got & want), fp + len(got - want), fn + len(want - got)
     return tp, fp, fn
 
 
 def test(path, repeats):
-    """Tag the gold headlines `repeats` times; print precision and recall per run and the flips."""
+    """Tag the gold headlines `repeats` times; print precision and recall per run and the flips. A
+    gold file with EU rows ("EU-HU") is scored on EU labels, any other on pairs."""
     gold = load_gold(path)
+    eu = any(label(g["pair"]) and is_eu(label(g["pair"])) for g in gold)
     records = list({g["id"]: {"id": g["id"], "title": g["title"], "lang": g["lang"] or None,
                               "source_country_raw": g["country"] or None, "source_name": g["source"] or None,
                               "tier": g.get("tier") or None}
@@ -376,19 +445,20 @@ def test(path, repeats):
     runs = [b[0] for b in both]
     precision, recall = [], []
     for n, (run, proposed, *_) in enumerate(both, 1):
-        tp, fp, fn = score_run(gold, run)
+        tp, fp, fn = score_run(gold, run, eu)
         precision.append(tp / (tp + fp) if tp + fp else 1.0)
         recall.append(tp / (tp + fn) if tp + fn else 1.0)
-        ptp, pfp, pfn = score_run(gold, proposed)
-        print(f"run {n}: precision {precision[-1]:.3f} ({tp} of {tp + fp}), recall {recall[-1]:.3f} ({tp} of {tp + fn});"
+        ptp, pfp, pfn = score_run(gold, proposed, eu)
+        print(f"run {n} ({'EU' if eu else 'pairs'}): precision {precision[-1]:.3f} ({tp} of {tp + fp}), recall {recall[-1]:.3f} ({tp} of {tp + fn});"
               f" tagger alone: precision {ptp / (ptp + pfp) if ptp + pfp else 1:.3f}, recall {ptp / (ptp + pfn) if ptp + pfn else 1:.3f}")
-    flips = sum(1 for r in records if len({tuple(sorted(run.get(r["id"], []))) for run in runs}) > 1)
+    kind = lambda labs: [lab for lab in labs if is_eu(lab) == eu]
+    flips = sum(1 for r in records if len({tuple(sorted(kind(run.get(r["id"], [])))) for run in runs}) > 1)
     for g in gold:
-        hits = sum(1 for run in runs if (run.get(g["id"]) if g["pair"] == "none" else parse_pair(g["pair"]) in run.get(g["id"], [])))
+        hits = sum(1 for run in runs if (kind(run.get(g["id"], [])) if g["pair"] == "none" else label(g["pair"]) in run.get(g["id"], [])))
         ok = hits * 2 > repeats if g["expect"] == "Y" else hits == 0
         if not ok:
             print(f"FAIL  {g['expect']} {g['pair']:<6} {hits}/{repeats}  {g.get('title_en') or g['title']}"
-                  f"  [{'; '.join(' '.join(run.get(g['id'], [])) or '-' for run in runs)}]")
+                  f"  [{'; '.join(' '.join(kind(run.get(g['id'], []))) or '-' for run in runs)}]")
     print(f"median precision {statistics.median(precision):.3f}, median recall {statistics.median(recall):.3f}; "
           f"{flips} of {len(records)} headlines changed between runs; ${meter.spent:.4f} for {meter.calls} calls; "
           f"version {v}")
@@ -407,21 +477,29 @@ WORDS = {"AT": "Austria|Austrian", "BE": "Belgium|Belgian", "BG": "Bulgaria|Bulg
 WORD_RE = {c: re.compile(rf"\b({w})\b") for c, w in WORDS.items()}
 
 
-def named_pairs(title):
-    """Pairs of countries an English headline names by name or adjective.
+EU_RE = re.compile(r"\b(EU|European Union|(European )?Commission|Brussels|European Parliament|MEPs?|ECB|European Central Bank|"
+                   r"Court of Justice|EU court|Eurogroup|European Council|Council of the EU|Frontex|Europol|EPPO|EIB|"
+                   r"von der Leyen|Kallas|Metsola|Lagarde)\b")
 
-    >>> named_pairs("German and Polish ministers meet"), named_pairs("Irish exports rise")
-    (['DE-PL'], [])
+
+def named_pairs(title):
+    """Pairs of countries an English headline names by name or adjective, and EU labels for the
+    countries it names beside an EU institution.
+
+    >>> named_pairs("German and Polish ministers meet"), named_pairs("Irish exports rise"), named_pairs("Commission fines Irish bank")
+    (['DE-PL'], [], ['EU-IE'])
     """
     found = sorted(c for c, rx in WORD_RE.items() if rx.search(title))
-    return [pair_key(a, b) for i, a in enumerate(found) for b in found[i + 1:]]
+    eu = [f"EU-{c}" for c in found] if EU_RE.search(title) else []
+    return [pair_key(a, b) for i, a in enumerate(found) for b in found[i + 1:]] + eu
 
 
 def review(now, repeats, budget, rejected_max=100, misses_max=60):
     """Tag the last 3 days' candidates `repeats` times and write a labelling workbook: every
-    (headline, pair) the checker confirmed in any run, a sample of proposals it always rejected (what
-    the check may cost in recall), and unproposed English headlines that name two countries. Each
-    row gets your_verdict (Y/N) and a note; the rows become calibration/pairs_gold.csv."""
+    (headline, label) the checker confirmed in any run, a sample of proposals it always rejected
+    (what the check may cost in recall), and unproposed English headlines that name two countries,
+    or a country beside an EU institution. Labels are pairs and EU labels ("EU-HU"). Each row gets
+    your_verdict (Y/N) and a note; the rows become calibration/pairs_gold.csv and eu_gold.csv."""
     import random
     from openpyxl import Workbook
     from gdelt_gal import add_sheet
@@ -436,8 +514,10 @@ def review(now, repeats, budget, rejected_max=100, misses_max=60):
     proposals = Counter((i, p) for b in both for i, ps in b[1].items() for p in ps)
     reasons = {k: why for b in both for k, (why, _) in b[2].items()}
     tagged_ids = {i for i, _ in proposals}
-    misses = [(r["id"], p) for r in records if r["id"] not in tagged_ids and r["lang"] == "en"
-              for p in named_pairs(r["title"])][:misses_max]
+    unproposed = [(r["id"], p) for r in records if r["id"] not in tagged_ids and r["lang"] == "en"
+                  for p in named_pairs(r["title"])]
+    misses = ([m for m in unproposed if not is_eu(m[1])][:misses_max]
+              + [m for m in unproposed if is_eu(m[1])][:misses_max])
     rejected = sorted(k for k in proposals if not hits[k])
     rejected = random.Random(0).sample(rejected, min(rejected_max, len(rejected)))
     rows = ([(i, p, hits[i, p], proposals[i, p], "confirmed") for i, p in hits]
@@ -452,7 +532,7 @@ def review(now, repeats, budget, rejected_max=100, misses_max=60):
     wb = Workbook(write_only=True)
     add_sheet(wb, "Pairs", ["pair", "countries", "runs_confirmed", "runs_proposed", "sample", "title_en", "checker_reason",
                             "title", "source", "country", "lang", "relevance", "your_verdict", "your_note", "url", "id"],
-              [[p, " and ".join(NAMES[c] for c in p.split("-")), f"{n}/{repeats}", f"{m}/{repeats}", kind,
+              [[p, names(p), f"{n}/{repeats}", f"{m}/{repeats}", kind,
                 english(by_id[i]), reasons.get((i, p), ""), by_id[i]["title"], by_id[i]["source_name"],
                 by_id[i]["source_country_raw"], by_id[i]["lang"], by_id[i]["relevance"], "", "", by_id[i]["url"], i]
                for i, p, n, m, kind in rows])
@@ -468,9 +548,11 @@ def review(now, repeats, budget, rejected_max=100, misses_max=60):
                  f"Prompts {PROMPT_VERSION} + {CHECK_VERSION} (version {v}), {repeats} runs; headlines with a confirmed pair per run: {per_run}",
                  f"Rows: all {len(hits)} (headline, pair) confirmed in at least one run; {len(rejected)} of the "
                  f"{len(proposals) - len(hits)} proposals the checker always rejected (random sample); {len(misses)} possible "
-                 f"misses (unproposed English headlines naming two countries, first {misses_max})",
+                 f"misses (unproposed English headlines naming two countries, or a country beside an EU institution; "
+                 f"first {misses_max} of each)",
                  f"Pairs confirmed: {len(pairs_seen)}; most: " + ", ".join(f"{p} {n}" for p, n in pairs_seen.most_common(12)),
-                 "your_verdict: Y if the headline is about a relationship or interaction between the two countries, N if not; your_note for anything else",
+                 "your_verdict: Y if the headline is about a relationship or interaction between the two countries "
+                 "(EU rows: between the EU institutions and the country), N if not; your_note for anything else",
                  f"Cost: ${meter.spent:.4f} for {meter.calls} calls (Haiku)"]:
         ws.append([line])
     wb.save(out)
@@ -479,7 +561,8 @@ def review(now, repeats, budget, rejected_max=100, misses_max=60):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--test", help="gold CSV (id, pair, expect, label, by, note, title, title_en, lang, country, source, tier)")
+    ap.add_argument("--test", help="gold CSV (id, pair, expect, label, by, note, title, title_en, lang, country, source, tier); "
+                                   "pair is a pair, an EU label (EU-HU) or none")
     ap.add_argument("--review", action="store_true", help="local: write a labelling workbook from the last 3 days")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--budget", type=float, default=RUN_BUDGET, help="USD cap for this run")
@@ -517,8 +600,10 @@ def main():
     by_day = defaultdict(list)
     for r in records:
         if got.get(r["id"]):
-            by_day[r["fetched_at"][:10]].append({"id": r["id"], "pairs": got[r["id"]],
-                                                 "why": {p: verdicts[r["id"], p][0] for p in got[r["id"]]}, "version": v,
+            labs = got[r["id"]]
+            by_day[r["fetched_at"][:10]].append({"id": r["id"], "pairs": [p for p in labs if not is_eu(p)],
+                                                 "eu": [p[3:] for p in labs if is_eu(p)],
+                                                 "why": {p: verdicts[r["id"], p][0] for p in labs}, "version": v,
                                                  "fetched_at": r["fetched_at"], "tagged_at": tagged_at,
                                                  **{k: r.get(k) for k in DISPLAY}})
     for day, lines in by_day.items():
@@ -533,7 +618,8 @@ def main():
 
     run = {"date": today, "run_at": tagged_at, "job": "pairs", "cost": round(meter.spent, 6), "calls": meter.calls,
            "checked": len(proposed), "proposed": sum(1 for x in proposed.values() if x),
-           "tagged": sum(1 for x in got.values() if x), "pending": len(records),
+           "tagged": sum(1 for x in got.values() if any(not is_eu(p) for p in x)),
+           "tagged_eu": sum(1 for x in got.values() if any(is_eu(p) for p in x)), "pending": len(records),
            "complete": complete, "version": v}
     COSTS.parent.mkdir(exist_ok=True)
     with COSTS.open("a", encoding="utf-8") as f:

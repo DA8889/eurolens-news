@@ -157,6 +157,9 @@ def fetch_feed(feed, fetched_at):
     for e in parsed.entries:
         link = unwrap_google(e.get("link") or "")
         title = strip_html(e.get("title"))
+        if feed.get("title_from") == "summary":   # the title is only a case number (CURIA); the summary's first paragraph says what it is
+            first = next((strip_html(p) for p in re.findall(r"<p>(.*?)</p>", e.get("summary") or "", re.S) if strip_html(p)), None)
+            title = first or title
         if not link or not title:
             continue
         source_name = feed["name"]
